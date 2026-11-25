@@ -33,6 +33,7 @@ import { BACK_ICON, FILE_DOWNLOAD_ICON } from "../icons.js";
 import type { PaneCacheDef, PaneNavigation } from "../types.js";
 import type { ExplorerPreview } from "../../src/web/explorer_io.js";
 import { absolutePath, endpoint, read } from "./io.js";
+import { isMarkdownFile, stopMarkdown, syncMarkdown } from "./markdown.js";
 
 interface ExplorerElement extends HTMLElement {
   _rs?: CommentPane["_rs"];
@@ -48,6 +49,7 @@ export interface Viewer {
   preview?: ExplorerPreview;
   previewText: string;
   htmlPreview: boolean;
+  markdownSource: boolean;
   htmlLoading?: boolean;
   htmlFrameFailed?: boolean;
   tabSeed?: ExplorerPreview;
@@ -155,6 +157,7 @@ async function loadFile(
     view.file = path;
     view.preview = undefined;
     view.previewText = "";
+    view.markdownSource = false;
     view.htmlPreview = false;
     view.htmlFrameFailed = false;
   }
@@ -466,7 +469,28 @@ function preview(view: Viewer): TemplateResult {
             </p>`
           : nothing}`
       : nothing}
+    ${!view.editing && item?.kind === "text" && isMarkdownFile(view.file!)
+      ? htmlFileModes(
+          !view.markdownSource,
+          false,
+          (preview) => {
+            view.markdownSource = !preview;
+            view.repaint();
+          },
+          "Markdown view",
+        )
+      : nothing}
     ${view.editing ? editor(view) : nothing}
+    ${!view.editing &&
+    item?.kind === "text" &&
+    isMarkdownFile(view.file!) &&
+    !view.markdownSource
+      ? html`<div
+          class="explorer-markdown"
+          tabindex="0"
+          aria-label="Markdown preview"
+        ></div>`
+      : nothing}
     ${item && !item.canonicalPath
       ? html`<p class="explorer-status" role="alert">
           Update this backend before editing files; it doesn’t identify the save
@@ -505,7 +529,7 @@ function preview(view: Viewer): TemplateResult {
         ><code></code></pre>`
       : nothing}
     ${view.previewLoading && !view.htmlLoading
-      ? html`<p class="explorer-status explorer-source-only" role="status">
+      ? html`<p class="explorer-status explorer-paging" role="status">
           Loading file…
         </p>`
       : nothing}
@@ -513,19 +537,19 @@ function preview(view: Viewer): TemplateResult {
     item.next !== null &&
     !view.editing &&
     !view.htmlLoading
-      ? html`<p class="explorer-status explorer-source-only">
+      ? html`<p class="explorer-status explorer-paging">
             Showing ${view.previewText.length.toLocaleString()} characters of
             ${(item.size / 1024).toFixed(0)} KB.
           </p>
           ${view.previewText.length < MAX_PREVIEW
             ? html`<button
-                class="btn sm explorer-more explorer-source-only"
+                class="btn sm explorer-more explorer-paging"
                 ?disabled=${view.previewLoading}
                 @click=${() => void loadFile(view, view.file!, true)}
               >
                 Load more
               </button>`
-            : html`<p class="explorer-status explorer-source-only">
+            : html`<p class="explorer-status explorer-paging">
                 Download the file to read the rest.
               </p>`}`
       : nothing}
@@ -614,7 +638,12 @@ export function renderExplorer(
     html`<section
       class="explorer ${view.file && view.htmlPreview
         ? "explorer-preview-mode"
-        : ""}"
+        : view.file &&
+            isMarkdownFile(view.file) &&
+            !view.markdownSource &&
+            !view.editing
+          ? "explorer-markdown-mode"
+          : ""}"
       aria-label=${view.tabId ? visiblePath(view.file!) : "Working folder"}
     >
       ${view.notice
@@ -626,6 +655,12 @@ export function renderExplorer(
   );
   syncComments(view);
   syncHtmlPreview(view);
+  syncMarkdown(
+    view.element,
+    view.cid,
+    view.file ? filePath(view) : "",
+    view.previewText,
+  );
 }
 
 export function viewerAt(element: HTMLElement): Viewer | undefined {
@@ -671,6 +706,7 @@ export function navigateFile(view: Viewer, command: PaneNavigation): boolean {
 }
 
 function stopViewer(view: Viewer): void {
+  stopMarkdown(view.element);
   view.previewRequest?.abort();
   view.previewLoading = false;
 }
@@ -735,6 +771,7 @@ export function viewerFor(
     notice: "",
     previewText: "",
     htmlPreview: false,
+    markdownSource: false,
     previewError: "",
     previewLoading: false,
     editing: false,
@@ -775,6 +812,7 @@ export function seedTab(
     view.preview = preview;
     view.previewText = preview.text ?? "";
     view.previewError = "";
+    view.markdownSource = false;
     view.htmlPreview = false;
     view.htmlFrameFailed = false;
     continueHtmlPreview(view, path);

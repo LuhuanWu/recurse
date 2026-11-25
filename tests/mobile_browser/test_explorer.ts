@@ -1,4 +1,5 @@
 import { expect } from "bun:test";
+import { tests as markdownTests } from "./test_explorer_markdown";
 import { mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
 import { retire } from "../../src/utils/trash";
 import type { BrowserContext, Route } from "playwright";
@@ -28,6 +29,7 @@ import {
 } from "./common";
 
 export const tests: BrowserTest[] = [
+  ...markdownTests,
   async function explorer_pages_previews_and_fuzzy_search(browser, base, data) {
     await using hints = await watchResourceHints();
     const temporary = await mkdtemp(join(data, "data", "browser-explorer-"));
@@ -641,6 +643,9 @@ export const tests: BrowserTest[] = [
             expect(paths).toHaveLength(33);
             for (const path of paths) {
               await tree.locator(`.explorer-row[data-path="${path}"]`).click();
+              await fileFor(path)
+                .getByRole("button", { name: "Source", exact: true })
+                .click();
               const preview = fileFor(path).locator(".explorer-source");
               await preview.waitFor();
               expect(await preview.textContent()).toBe(
@@ -983,6 +988,9 @@ export const tests: BrowserTest[] = [
             expect(notes.length).toBeGreaterThan(slots);
             for (const path of notes.slice(0, slots)) {
               await tree.locator(`.explorer-row[data-path="${path}"]`).click();
+              await fileFor(path)
+                .getByRole("button", { name: "Source", exact: true })
+                .click();
               const preview = fileFor(path).locator(".explorer-source");
               await preview.waitFor();
               expect(await preview.textContent()).toBe(

@@ -1,4 +1,4 @@
-// Shared limits and Source/Preview control for ordinary HTML files.
+// Shared limits for HTML files and Source/Preview control for document files.
 import { html } from "lit";
 
 export const isHtmlFile = (name: string): boolean => /\.html?$/i.test(name);
@@ -13,8 +13,9 @@ export function htmlFileModes(
   preview: boolean,
   unavailable: boolean,
   select: (preview: boolean) => void,
+  label = "HTML view",
 ) {
-  return html`<div class="html-file-modes" role="group" aria-label="HTML view">
+  return html`<div class="html-file-modes" role="group" aria-label=${label}>
     <button
       class="btn sm"
       type="button"
