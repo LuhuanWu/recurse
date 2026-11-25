@@ -20,7 +20,7 @@ export const tests: BrowserTest[] = [
     const root = await mkdtemp(join(data, "data", "explorer-markdown-"));
     const source = `# Working notes
 
-A **readable** document with \`inline code\` and $x^2$.
+A **readable** document with \`inline code\` and \\(x^2\\).
 
 | Feature | Status |
 | --- | --- |
@@ -198,13 +198,15 @@ ${"Bounded Markdown pages keep the rest available through Load more.\n\n".repeat
             .getByRole("heading", { name: "Updated notes" })
             .waitFor();
           expect(await readFile(join(root, name), "utf8")).toBe(edited);
-          await browserExpect
-            .poll(
-              async () =>
-                (await postFixture(base, "file-edit-captures", { agent }))
-                  .running,
-            )
-            .toBe(false);
+          await page
+            .locator("#messages .msg.assistant", { hasText: "Acknowledged." })
+            .waitFor({ state: "attached" });
+          const captured = await postFixture(base, "file-edit-captures", {
+            agent,
+          });
+          expect(captured.providerRequests.join("\n")).toContain(
+            `I edited ${root}/${name}`,
+          );
           const dimensions = await pane
             .locator(".pane-body")
             .evaluate((node) => [node.scrollWidth, node.clientWidth]);
