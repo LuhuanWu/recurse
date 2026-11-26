@@ -51,6 +51,7 @@ export function syncMarkdown(
     const href = link.getAttribute("href")!;
     if (!/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) {
       link.removeAttribute("href");
+      link.classList.add("artifact-blocked-link");
       link.setAttribute("aria-disabled", "true");
       link.title = "Open this file from Explorer.";
       blocked = true;
