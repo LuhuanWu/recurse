@@ -261,7 +261,8 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           name: "Comment on selection",
         });
         await browserExpect(commentButton).toBeEnabled();
-        await largeHeading.selectText();
+        if (width === 1280) await largeHeading.click({ clickCount: 3 });
+        else await largeHeading.selectText();
         await largeHeading.evaluate(() => {
           const send = MessagePort.prototype.postMessage;
           MessagePort.prototype.postMessage = function (
@@ -269,6 +270,7 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
             data: any,
           ) {
             if (data.type === "selection") {
+              document.querySelector("h1")!.dataset.heldQuote = data.quote;
               (window as any).lateSelection = () => send.call(this, data);
             } else if (data.type !== "closed") send.call(this, data);
           } as typeof send;
@@ -277,6 +279,10 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
         await details
           .getByText("Reading selection…", { exact: true })
           .waitFor();
+        await browserExpect(largeHeading).toHaveAttribute(
+          "data-held-quote",
+          "Large file",
+        );
         let releaseNavigation!: () => void;
         const navigationGate = new Promise<void>((resolve) => {
           releaseNavigation = resolve;
