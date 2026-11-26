@@ -74,6 +74,9 @@ export async function expectHtmlSourceFallback(
   page.on("frameattached", onFrame);
   try {
     await open();
+    await pane
+      .getByText("Couldn’t show the preview. Showing source.", { exact: true })
+      .waitFor();
     const { source: sourceMode, preview } = htmlModes(pane);
     await browserExpect(preview).toBeDisabled();
     await browserExpect(sourceMode).toHaveAttribute("aria-pressed", "true");
