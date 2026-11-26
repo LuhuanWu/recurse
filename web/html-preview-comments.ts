@@ -1,6 +1,7 @@
 // Trusted controls query an opaque frame for a bounded quote. A single-use
 // per-document nonce binds a private port; only a real parent click opens a
 // draft. Frame messages never choose identity, markup, comment text or sends.
+
 const resets = new WeakMap<HTMLIFrameElement, (fragment?: string) => void>();
 
 export function resetHtmlComments(

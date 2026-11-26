@@ -47,7 +47,9 @@ Uploaded and published HTML and Explorer HTML use the Artifact app isolation.
 Source shows highlighted markup; Preview runs inline scripts and styles and
 loads embedded data images, fonts and media. Separate files do not load as
 subresources, even when adjacent to the HTML. Its revocable Blob URL avoids
-browser data-URL length limits without resolving relative files against Recurse. Preview cannot read the Recurse page, cookies or API,
+browser data-URL length limits without resolving relative files against Recurse.
+The Blob address includes Recurse's scheme, host and port; the frame's origin
+remains opaque. Preview cannot read the Recurse page, cookies or API,
 open popups, submit forms or navigate the Recurse page.
 Resource hints in the original HTML are removed before rendering. Because the
 filter's parser can interpret markup differently from Chromium, a second check

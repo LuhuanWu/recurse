@@ -932,7 +932,7 @@ export const tests: BrowserTest[] = [
           ).toBe(true);
           boundary.expectNoRequests();
           expect(await htmlCode.isVisible()).toBe(false);
-          expect(await pane.locator(".report-comment").isVisible()).toBe(true);
+          await browserExpect(pane.locator(".report-comment")).toBeVisible();
           expect(requests).toHaveLength(beforeToggle);
           const beforeHtmlReopen = requests.length;
           await previewMode.focus();

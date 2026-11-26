@@ -31,7 +31,7 @@ Their comments are quoted snapshots, not live DOM ranges: app changes cannot
 silently move a quote to different text. The trusted parent owns the editor,
 revision and outbox; the iframe only answers bounded selection requests.
 Reloading an app preserves a typed quote snapshot, even when the new app text
-no longer matches it; changing the selected source or revision does not.
+differs from it; changing the selected source or revision does not.
 
 ## Submission and navigation
 

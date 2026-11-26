@@ -269,29 +269,67 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
             data: any,
           ) {
             if (data.type === "selection") {
-              MessagePort.prototype.postMessage = send;
               (window as any).lateSelection = () => send.call(this, data);
-            } else send.call(this, data);
+            } else if (data.type !== "closed") send.call(this, data);
           } as typeof send;
         });
         await commentButton.click();
         await details
           .getByText("Reading selection…", { exact: true })
           .waitFor();
+        let releaseNavigation!: () => void;
+        const navigationGate = new Promise<void>((resolve) => {
+          releaseNavigation = resolve;
+        });
+        await page.route(`${base}preview-navigation`, (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: '<p>Navigation complete</p><img src="preview-navigation-image">',
+          }),
+        );
+        await page.route(`${base}preview-navigation-image`, async (route) => {
+          await navigationGate;
+          await route.fulfill({
+            contentType: "image/svg+xml",
+            body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
+          });
+        });
         const navigatingFrame = await (await details
           .locator("iframe")
           .elementHandle())!.contentFrame();
-        await largeHeading.evaluate(() => {
-          addEventListener("pagehide", () => (window as any).lateSelection(), {
-            once: true,
-          });
-          window.location.href = "about:blank";
-        });
-        await navigatingFrame!.waitForURL("about:blank");
-        await browserExpect(commentButton).toBeDisabled();
-        await browserExpect(
-          page.locator(".report-comment-popover"),
-        ).toBeHidden();
+        try {
+          await largeHeading.evaluate((_element, url) => {
+            addEventListener(
+              "pagehide",
+              () => (window as any).lateSelection(),
+              {
+                once: true,
+                capture: true,
+              },
+            );
+            window.location.href = url;
+          }, `${base}preview-navigation`);
+          await details
+            .frameLocator("iframe")
+            .getByText("Navigation complete", { exact: true })
+            .waitFor();
+          await details
+            .getByText("Reading selection…", { exact: true })
+            .waitFor({ state: "hidden" });
+          await browserExpect(
+            page.locator(".report-comment-popover"),
+          ).toBeHidden();
+          await browserExpect(
+            page.locator(".report-comment-popover blockquote"),
+          ).toBeHidden();
+          await browserExpect(commentButton).toBeDisabled();
+          await browserExpect(details.locator(".report-comment")).toHaveCount(
+            0,
+          );
+        } finally {
+          releaseNavigation();
+          await navigatingFrame!.waitForLoadState("load");
+        }
         await details
           .getByRole("button", { name: "Source", exact: true })
           .click();
@@ -303,6 +341,22 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
         await browserExpect(
           page.locator(".report-comment-popover"),
         ).toBeHidden();
+        await largeHeading.evaluate(() => {
+          const range = document.createRange();
+          range.selectNodeContents(document);
+          getSelection()!.removeAllRanges();
+          getSelection()!.addRange(range);
+        });
+        await commentButton.click();
+        const fullQuote = page.locator(".report-comment-popover blockquote");
+        await browserExpect(fullQuote).toContainText("Large file");
+        expect((await fullQuote.textContent())!.length).toBeLessThanOrEqual(
+          600,
+        );
+        await page
+          .locator(".report-comment-popover")
+          .getByRole("button", { name: "Cancel", exact: true })
+          .click();
         await details
           .frameLocator("iframe")
           .locator("#late-a")

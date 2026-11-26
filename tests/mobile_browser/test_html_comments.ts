@@ -13,7 +13,7 @@ import {
 
 export const tests: BrowserTest[] = [
   // Feature: #0 bounded HTML previews stage quote-only comments through the trusted parent and real send path.
-  async function html_preview_comments_in_explorer(browser, base, data) {
+  async function test_html_preview_comments_in_explorer(browser, base, data) {
     const root = await mkdtemp(join(data, "html-comments-"));
     await writeFile(
       join(root, "report.html"),

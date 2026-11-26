@@ -1,12 +1,14 @@
-// First-script selection relay for opaque HTML frames. The private port only
-// answers parent requests with bounded plain text; it has no send or state API.
-// Blob fragments use same-document history updates: native links otherwise try
-// to reload a parent-origin Blob from this opaque, sandboxed document.
+// First-script, bounded quote relay for opaque frames; no send or state API.
+// Native capture-phase shutdown precedes authored pagehide handlers.
+// Blob fragment links use same-document history updates instead of reloading
+// a parent-origin Blob from an opaque sandbox.
+
 export const PREVIEW_SELECTION_SCRIPT = `<script id="recurse-preview-selection">(()=>{
   if(parent===window)return;
   const token=location.hash.slice(1);
   if(!/^recurse-(app-state|preview)=[0-9-]{16,160}$/.test(token))return;
   const channel=new MessageChannel(), port=channel.port1;
+  const send=port.postMessage.bind(port), close=port.close.bind(port);
   if(location.protocol==='blob:')addEventListener('click',(event)=>{
     if(event.defaultPrevented||event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
     const link=event.target instanceof Element?event.target.closest('a[href]'):null;
@@ -33,7 +35,8 @@ export const PREVIEW_SELECTION_SCRIPT = `<script id="recurse-preview-selection">
     let node=range.startContainer, text='', visited=0;
     if(node.nodeType!==3)node=node.childNodes[range.startOffset]||after(node);
     while(node&&text.length<600&&++visited<=4096){
-      if(range.comparePoint(node,0)>0)break;
+      if(node.nodeType!==10&&range.comparePoint(node,0)>0)break;
+      if(node.nodeType===1&&/^(HEAD|SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/i.test(node.nodeName)){node=after(node);continue}
       if(node.nodeType===3&&range.intersectsNode(node)){
         const start=node===range.startContainer?range.startOffset:0;
         const end=node===range.endContainer?range.endOffset:node.length;
@@ -48,5 +51,5 @@ export const PREVIEW_SELECTION_SCRIPT = `<script id="recurse-preview-selection">
     port.postMessage({type:'selection',request:data.request,quote:selected()});
   };
   parent.postMessage({type:'recurse-preview-selection:connect',token},'*',[channel.port2]);
-  addEventListener('pagehide',()=>{port.postMessage({type:'closed'});port.close()},{once:true});
+  addEventListener('pagehide',()=>{send({type:'closed'});close()},{once:true,capture:true});
 })()</script>`;
