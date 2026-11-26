@@ -67,13 +67,14 @@ export function htmlPreviewComments(
         !frame.isConnected ||
         event.source !== frame.contentWindow ||
         !data ||
-        Object.keys(data).length !== 2 ||
+        typeof data !== "object" ||
         data.type !== "recurse-preview-selection:connect" ||
         event.ports.length !== 1 ||
         typeof data.token !== "string" ||
         !/^recurse-(app-state|preview)=[0-9-]{16,160}$/.test(data.token) ||
         data.token !== token() ||
-        data.token === spent
+        data.token === spent ||
+        Object.keys(data).length !== 2
       )
         return;
       disconnect();
@@ -102,11 +103,12 @@ export function htmlPreviewComments(
           !visible() ||
           ports.length ||
           !data ||
-          Object.keys(data).length !== 3 ||
+          typeof data !== "object" ||
           data.type !== "selection" ||
           data.request !== pending ||
           typeof data.quote !== "string" ||
-          data.quote.length > 600
+          data.quote.length > 600 ||
+          Object.keys(data).length !== 3
         )
           return;
         pending = 0;

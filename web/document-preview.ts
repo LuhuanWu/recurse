@@ -250,10 +250,11 @@ export async function htmlFileFrame(
   frame.setAttribute("sandbox", "allow-scripts");
   const filtered = await documentWork<string>({ markup }, signal);
   signal.throwIfAborted();
+  const fragment = htmlPreviewFragment();
   const url = URL.createObjectURL(
     new Blob([filtered], { type: "text/html;charset=utf-8" }),
   );
-  frame.src = url + htmlPreviewFragment();
+  frame.src = url + fragment;
   signal.addEventListener(
     "abort",
     () => {

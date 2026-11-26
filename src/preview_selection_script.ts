@@ -1,5 +1,7 @@
 // First-script selection relay for opaque HTML frames. The private port only
 // answers parent requests with bounded plain text; it has no send or state API.
+// Blob fragments use same-document history updates: native links otherwise try
+// to reload a parent-origin Blob from this opaque, sandboxed document.
 export const PREVIEW_SELECTION_SCRIPT = `<script id="recurse-preview-selection">(()=>{
   if(parent===window)return;
   const token=location.hash.slice(1);
@@ -42,7 +44,7 @@ export const PREVIEW_SELECTION_SCRIPT = `<script id="recurse-preview-selection">
     return text.replace(/\\s+/g,' ').trim();
   };
   port.onmessage=({data,ports})=>{
-    if(ports.length||!data||Object.keys(data).length!==2||data.type!=='selection'||!Number.isSafeInteger(data.request)||data.request<1)return;
+    if(ports.length||!data||typeof data!=='object'||data.type!=='selection'||!Number.isSafeInteger(data.request)||data.request<1||Object.keys(data).length!==2)return;
     port.postMessage({type:'selection',request:data.request,quote:selected()});
   };
   parent.postMessage({type:'recurse-preview-selection:connect',token},'*',[channel.port2]);
