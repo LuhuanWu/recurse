@@ -16,7 +16,11 @@ import {
 
 export const tests: BrowserTest[] = [
   // Feature: #0 Explorer renders Markdown while retaining paged source, editing and comments.
-  async function explorer_markdown_preview_and_source(browser, base, data) {
+  async function test_explorer_markdown_preview_and_source(
+    browser,
+    base,
+    data,
+  ) {
     const root = await mkdtemp(join(data, "data", "explorer-markdown-"));
     const source = `# Working notes
 
