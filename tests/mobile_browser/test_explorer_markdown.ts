@@ -53,10 +53,8 @@ ${"Bounded Markdown pages keep the rest available through Load more.\n\n".repeat
     try {
       await writeFile(
         join(root, "dot.png"),
-        Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVQImWNgAAIAAAUAAYXKMgwAAAAASUVORK5CYII=",
-          "base64",
-        ),
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVQImWNgAAIAAAUAAYXKMgwAAAAASUVORK5CYII=",
+        "base64",
       );
       for (const width of [1280, 412]) {
         const name = width === 1280 ? "notes.md" : "notes.MARKDOWN";
