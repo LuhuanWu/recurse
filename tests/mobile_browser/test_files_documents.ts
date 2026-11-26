@@ -437,7 +437,6 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .locator(".msg.assistant .content")
           .getByText(reply, { exact: true })
           .waitFor();
-        // Sending selects Chat; a retained desktop tab still owns its Blob.
         if (largePane) {
           await browserExpect.poll(canReadLargeBlob).toBe(true);
           await closeFileTab(page, largePane);
