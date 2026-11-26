@@ -257,6 +257,17 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .locator("iframe")
           .getAttribute("src"))!.split("#")[0];
         expect(largeUrl).toStartWith("blob:");
+        const largePane =
+          width > 700 ? (await details.getAttribute("data-pane"))! : undefined;
+        const canReadLargeBlob = () =>
+          page.evaluate(async (url) => {
+            try {
+              await fetch(url);
+              return true;
+            } catch {
+              return false;
+            }
+          }, largeUrl);
         const commentButton = details.getByRole("button", {
           name: "Comment on selection",
         });
@@ -414,6 +425,7 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
         await details
           .getByRole("button", { name: "Preview", exact: true })
           .click();
+        if (!largePane) await browserExpect.poll(canReadLargeBlob).toBe(true);
         const delivered = page.waitForRequest((request) =>
           request.url().endsWith(`/api/conversations/${demo}/deliver`),
         );
@@ -421,25 +433,20 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
         const content = (await delivered).postDataJSON().content as string;
         expect(content).toContain(`> Large file\nReply only ${reply}`);
         expect(content).not.toContain("- line ");
-        await details.locator(".files-document").waitFor({ state: "detached" });
-        expect(
-          await page.evaluate(async (url) => {
-            try {
-              await fetch(url);
-              return true;
-            } catch {
-              return false;
-            }
-          }, largeUrl),
-        ).toBeFalse();
         await page
           .locator(".msg.assistant .content")
           .getByText(reply, { exact: true })
           .waitFor();
+        // Sending selects Chat; a retained desktop tab still owns its Blob.
+        if (largePane) {
+          await browserExpect.poll(canReadLargeBlob).toBe(true);
+          await closeFileTab(page, largePane);
+        }
         await openReplyFile(page, "report.html");
         await details
           .getByRole("button", { name: "Source", exact: true })
           .click();
+        await browserExpect.poll(canReadLargeBlob).toBe(false);
         await dispatchArtifactSelection(
           page,
           width === 412 ? "touch" : "mouse",
