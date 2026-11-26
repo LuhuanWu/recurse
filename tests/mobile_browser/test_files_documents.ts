@@ -257,8 +257,6 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .locator("iframe")
           .getAttribute("src"))!.split("#")[0];
         expect(largeUrl).toStartWith("blob:");
-        const largePane =
-          width > 700 ? (await details.getAttribute("data-pane"))! : undefined;
         const canReadLargeBlob = () =>
           page.evaluate(async (url) => {
             try {
@@ -425,7 +423,7 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
         await details
           .getByRole("button", { name: "Preview", exact: true })
           .click();
-        if (!largePane) await browserExpect.poll(canReadLargeBlob).toBe(true);
+        await browserExpect.poll(canReadLargeBlob).toBe(true);
         const delivered = page.waitForRequest((request) =>
           request.url().endsWith(`/api/conversations/${demo}/deliver`),
         );
@@ -437,10 +435,6 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .locator(".msg.assistant .content")
           .getByText(reply, { exact: true })
           .waitFor();
-        if (largePane) {
-          await browserExpect.poll(canReadLargeBlob).toBe(true);
-          await closeFileTab(page, largePane);
-        }
         await openReplyFile(page, "report.html");
         await details
           .getByRole("button", { name: "Source", exact: true })
