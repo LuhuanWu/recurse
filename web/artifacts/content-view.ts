@@ -22,6 +22,7 @@ import { artifactLinkUrl } from "../deep-link.js";
 import { invalidatePaneCache } from "../panes.js";
 import { watchPageErrors } from "./page-errors.js";
 import { attachAppState, reloadAppFrame } from "./app-state-bridge.js";
+import { htmlPreviewComments } from "../html-preview-comments.js";
 import { cancelSelectionComment } from "./selection-comments.js";
 import type { ArtifactInfo } from "./model.js";
 import { artifactMount, type ArtifactEl } from "./artifact-state.js";
@@ -86,24 +87,20 @@ function appendLiveEmbed(
   frame.setAttribute("aria-describedby", description.id);
   const agent = pane._rs.agentId!;
   const version = pane._rs.selectedVersion;
+  const active = () =>
+    artifactMount.current === pane &&
+    !pane._rs.awaitingHistory &&
+    pane._rs.agentId === agent &&
+    pane._rs.selId === info.id &&
+    pane._rs.selectedVersion === version;
   frame.src =
     refreshUrl(pane, artifactPageUrl(agent, info.id, version)) +
-    attachAppState(
-      frame,
-      agent,
-      info.id,
-      signal,
-      () =>
-        artifactMount.current === pane &&
-        !pane._rs.awaitingHistory &&
-        pane._rs.agentId === agent &&
-        pane._rs.selId === info.id &&
-        pane._rs.selectedVersion === version,
-    );
+    attachAppState(frame, agent, info.id, signal, active);
+  const comments = htmlPreviewComments(frame, signal, active);
   const errors = document.createElement("div");
   errors.className = "artifact-errors";
   errors.setAttribute("aria-live", "polite");
-  body.append(description, errors, frame);
+  body.append(description, errors, comments, frame);
   watchPageErrors(pane, info, frame, errors);
   watchArtifactHeight(frame);
 }

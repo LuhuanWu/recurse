@@ -27,6 +27,7 @@ and metadata cache) · [formats.ts](store/formats.ts) (entry selection and media
 [page/](page/index.ts) (isolated app builds and head insertion) · [check.ts](check.ts) (checks built
 apps in a browser) · [preview.ts](preview.ts) · [theme.ts](theme.ts) ·
 [key_relay.ts](key_relay.ts) · [app_state_script.ts](app_state_script.ts) (app API) ·
+[../preview_selection_script.ts](../preview_selection_script.ts) (quote-only selection relay) ·
 [../artifact_app_state.ts](../artifact_app_state.ts) (saved state and its pinned storage) ·
 [working_path.ts](working_path.ts) (portable paths) ·
 [../extensions/core/environment/artifact.ts](../extensions/core/environment/artifact.ts)
@@ -130,7 +131,8 @@ frame navigates to cannot connect. A page that retries the spent nonce, such as
 an app that reloads itself, gets an error asking to refresh the Artifact. State and save requests then travel over the document's message
 port, not the frame window that a later navigation can reuse. The viewer fixes
 the backend, owner and Artifact ID and keeps at most one write in flight per
-frame. It checks both against the current selection before each request.
+frame. The selection relay uses a separate, independently spent connection
+with the same document nonce; it has no saved-state or message-send capability. It checks both against the current selection before each request.
 Changing the selection, including before returning through history to open
 another Artifact, removes the old live frame and closes its connection before
 the new content loads. The viewer checks for replacements only while an app

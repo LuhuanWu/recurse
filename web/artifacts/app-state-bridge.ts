@@ -11,6 +11,7 @@ import {
 } from "../../src/artifact_app_state_protocol.js";
 import { backendFor } from "../backends/index.js";
 import { artifactAppStatePath } from "./model.js";
+import { resetHtmlComments } from "../html-preview-comments.js";
 
 const LOAD_ERROR = "Could not load saved app state";
 const SAVE_ERROR = "Could not save app state";
@@ -57,6 +58,7 @@ async function readJson(response: Response): Promise<string> {
 export function reloadAppFrame(frame: HTMLIFrameElement): void {
   const fragment = resetFrame.get(frame)?.();
   if (!fragment) return;
+  resetHtmlComments(frame, fragment);
   const url = new URL(frame.src);
   url.hash = fragment;
   url.searchParams.set(

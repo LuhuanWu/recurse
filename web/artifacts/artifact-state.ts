@@ -34,12 +34,11 @@ export interface CommentBox {
   w: number;
   h: number;
 }
-export interface Comment {
+interface CommentFields {
   cid: string;
   agentId: string;
   artifactId: string;
   version: string;
-  range: Range;
   quote: string;
   /** The full selection in the original document's text, before quote truncation. */
   textRange?: { start: number; end: number };
@@ -47,6 +46,8 @@ export interface Comment {
   box?: CommentBox;
   crop?: PreparedCrop;
 }
+export type Comment = CommentFields &
+  ({ range: Range; frameQuote?: never } | { range: null; frameQuote: true });
 export interface ArtifactState {
   agentId: string | null;
   browsing: boolean;

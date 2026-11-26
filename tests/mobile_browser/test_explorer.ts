@@ -1,5 +1,6 @@
 import { expect } from "bun:test";
 import { tests as markdownTests } from "./test_explorer_markdown";
+import { tests as htmlCommentTests } from "./test_html_comments";
 import { mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
 import { retire } from "../../src/utils/trash";
 import type { BrowserContext, Route } from "playwright";
@@ -30,6 +31,7 @@ import {
 
 export const tests: BrowserTest[] = [
   ...markdownTests,
+  ...htmlCommentTests,
   async function explorer_pages_previews_and_fuzzy_search(browser, base, data) {
     await using hints = await watchResourceHints();
     const temporary = await mkdtemp(join(data, "data", "browser-explorer-"));
@@ -930,7 +932,7 @@ export const tests: BrowserTest[] = [
           ).toBe(true);
           boundary.expectNoRequests();
           expect(await htmlCode.isVisible()).toBe(false);
-          expect(await pane.locator(".report-comment").isVisible()).toBe(false);
+          expect(await pane.locator(".report-comment").isVisible()).toBe(true);
           expect(requests).toHaveLength(beforeToggle);
           const beforeHtmlReopen = requests.length;
           await previewMode.focus();

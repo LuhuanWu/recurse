@@ -9,12 +9,14 @@ import { copyText } from "../tool_details.js";
 import { highlightSource } from "../source-preview.js";
 import {
   htmlFileModes,
+  htmlSourceText,
   HTML_OFFLINE_NOTE,
   HTML_PREVIEW_FAILED,
   HTML_TOO_LARGE,
   isHtmlFile,
   MAX_HTML_PREVIEW_BYTES,
 } from "../html-file-view.js";
+import { htmlPreviewComments } from "../html-preview-comments.js";
 import { sendOperatorMessage } from "../conversation/index.js";
 import {
   claimComments,
@@ -52,6 +54,13 @@ export interface Viewer {
   markdownSource: boolean;
   htmlLoading?: boolean;
   htmlFrameFailed?: boolean;
+  htmlView?: {
+    container: HTMLElement;
+    controller: AbortController;
+    text: string;
+    name: string;
+  };
+  previewBytes?: number;
   tabSeed?: ExplorerPreview;
   previewError: string;
   previewLoading: boolean;
@@ -157,6 +166,7 @@ async function loadFile(
     view.file = path;
     view.preview = undefined;
     view.previewText = "";
+    view.previewBytes = 0;
     view.markdownSource = false;
     view.htmlPreview = false;
     view.htmlFrameFailed = false;
@@ -213,8 +223,14 @@ async function readFileChunk(view: Viewer, path: string, signal: AbortSignal) {
     (preview.next <= Number(query.offset ?? 0) || preview.next >= preview.size)
   )
     throw new Error("Couldn’t load the complete file for preview.");
+  const text = preview.text ?? "";
+  const size =
+    (view.previewBytes ?? 0) + new TextEncoder().encode(text).byteLength;
+  if (isHtmlFile(path) && size > MAX_HTML_PREVIEW_BYTES)
+    throw new Error("This file is too large to preview.");
+  view.previewBytes = size;
   view.preview = preview;
-  view.previewText += preview.text ?? "";
+  view.previewText += text;
 }
 
 async function completeHtml(view: Viewer, path: string, signal: AbortSignal) {
@@ -528,6 +544,14 @@ function preview(view: Viewer): TemplateResult {
           tabindex="0"
         ><code></code></pre>`
       : nothing}
+    ${item?.kind === "text" &&
+    isHtmlFile(view.file!) &&
+    !view.htmlPreview &&
+    item.size > MAX_PREVIEW
+      ? html`<p class="explorer-status">
+          Source truncated. Download the file to read the rest.
+        </p>`
+      : nothing}
     ${view.previewLoading && !view.htmlLoading
       ? html`<p class="explorer-status explorer-paging" role="status">
           Loading file…
@@ -554,8 +578,8 @@ function preview(view: Viewer): TemplateResult {
               </p>`}`
       : nothing}
     ${item?.kind === "text" && !view.editing && !view.htmlLoading
-      ? html`<div class="report-comments explorer-source-only"></div>
-          <div class="report-bar explorer-source-only"></div>`
+      ? html`<div class="report-comments explorer-comment-controls"></div>
+          <div class="report-bar explorer-comment-controls"></div>`
       : nothing}
     ${view.htmlPreview
       ? html`<p class="html-file-note">${HTML_OFFLINE_NOTE}</p>
@@ -588,10 +612,12 @@ function syncComments(view: Viewer): void {
     if (commentMount.current === pane) commentMount.current = null;
     return;
   }
+  const text = isHtmlFile(item!.path)
+    ? htmlSourceText(view.previewText)
+    : view.previewText;
   const shown = code.textContent ?? "";
-  if (!view.previewText.startsWith(shown)) code.textContent = view.previewText;
-  else if (shown.length < view.previewText.length)
-    code.append(view.previewText.slice(shown.length));
+  if (!text.startsWith(shown)) code.textContent = text;
+  else if (shown.length < text.length) code.append(text.slice(shown.length));
   highlightSource(code, item!.path);
   claimComments(pane, commentRendering);
   reanchor(pane, id);
@@ -602,23 +628,42 @@ function syncHtmlPreview(view: Viewer): void {
   const container = view.element.querySelector<HTMLElement>(
     ".explorer-html-preview",
   );
-  if (!container || container.dataset.loading) return;
+  if (
+    view.htmlView?.container === container &&
+    view.htmlView.text === view.previewText &&
+    view.htmlView.name === view.file &&
+    !view.htmlView.controller.signal.aborted
+  )
+    return;
+  view.htmlView?.controller.abort();
+  view.htmlView = undefined;
+  if (!container) return;
+  const controller = new AbortController();
   const text = view.previewText;
   const name = view.file!;
+  view.htmlView = { container, controller, text, name };
   container.dataset.loading = "true";
   container.setAttribute("role", "status");
   container.textContent = "Loading preview…";
   const ownsView = () =>
     !view.disposed &&
+    !controller.signal.aborted &&
+    view.htmlPreview &&
     view.element.contains(container) &&
     view.file === name &&
     view.previewText === text;
   void import("../document-preview.js")
     .then(async ({ htmlFileFrame }) => {
       if (!ownsView()) return;
-      const frame = await htmlFileFrame(text, name);
-      if (!ownsView()) return;
-      container.replaceChildren(frame);
+      const frame = await htmlFileFrame(text, name, controller.signal);
+      if (!ownsView()) {
+        controller.abort();
+        return;
+      }
+      container.replaceChildren(
+        htmlPreviewComments(frame, controller.signal, ownsView),
+        frame,
+      );
       container.removeAttribute("role");
     })
     .catch(() => {
@@ -708,6 +753,7 @@ export function navigateFile(view: Viewer, command: PaneNavigation): boolean {
 function stopViewer(view: Viewer): void {
   stopMarkdown(view.element);
   view.previewRequest?.abort();
+  view.htmlView?.controller.abort();
   view.previewLoading = false;
 }
 
@@ -811,6 +857,7 @@ export function seedTab(
     view.tabSeed = preview;
     view.preview = preview;
     view.previewText = preview.text ?? "";
+    view.previewBytes = new TextEncoder().encode(view.previewText).byteLength;
     view.previewError = "";
     view.markdownSource = false;
     view.htmlPreview = false;

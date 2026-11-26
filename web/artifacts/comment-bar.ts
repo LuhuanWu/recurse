@@ -265,9 +265,10 @@ function composeMessage(
     let prefix: string | null = null;
     try {
       const root = commentRoot(pane);
-      const location = root
-        ? locateComment(root, markedRange(root, note.cid) ?? note.range)
-        : null;
+      const location =
+        root && note.range
+          ? locateComment(root, markedRange(root, note.cid) ?? note.range)
+          : null;
       if (location)
         prefix = `- line ${location.line}, chars ${location.start}-${location.end}:`;
     } catch {

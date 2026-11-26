@@ -22,19 +22,26 @@ export interface SelectionSource {
   offerToken: number;
 }
 
-export interface SelectionDraft {
+interface SelectionDraftFields {
   pane: CommentPane;
   key: string;
   version: string;
   root: Element;
   source: SelectionSource;
-  range: Range;
   quote: string;
   box?: CommentBox;
   crop?: PreparedCrop;
   mark?: HTMLElement;
   edit?: { comment: Comment; anchor: HTMLElement };
 }
+export type SelectionDraft = SelectionDraftFields &
+  (
+    | { range: Range; frameQuote?: never }
+    | {
+        range: null;
+        frameQuote: { anchor: HTMLElement };
+      }
+  );
 export let selectionDraft: SelectionDraft | null = null;
 export function setSelectionDraft(draft: SelectionDraft | null): void {
   selectionDraft = draft;
@@ -45,7 +52,13 @@ export function captureSelectionDraftRange(
   subtree: HTMLElement,
 ): (() => void) | undefined {
   const draft = selectionDraft;
-  if (!draft || draft.edit || draft.box || !subtree.contains(draft.root))
+  if (
+    !draft ||
+    draft.edit ||
+    draft.box ||
+    !draft.range ||
+    !subtree.contains(draft.root)
+  )
     return;
   const { range, root } = draft;
   const { startContainer, startOffset, endContainer, endOffset } = range;

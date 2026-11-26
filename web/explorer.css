@@ -181,7 +181,8 @@
 }
 .explorer-preview-mode .explorer-source-only,
 .explorer-preview-mode .explorer-paging,
-.explorer-markdown-mode .explorer-source-only {
+.explorer-markdown-mode .explorer-source-only,
+.explorer-markdown-mode .explorer-comment-controls {
   display: none;
 }
 .explorer-markdown {

@@ -4,6 +4,7 @@ import type { Locator } from "playwright";
 import { expect as browserExpect } from "playwright/test";
 import {
   captureErrors,
+  dispatchArtifactSelection,
   closeWithRoutes,
   gotoRoot,
   postFixture,
@@ -109,13 +110,15 @@ export const tests: BrowserTest[] = [
 <link rel="stylesheet" href="${external}style.css">
 <style>@import url('${external}import.css'); #series { display: flex; gap: 1em; } h1 { color: #156fa1; }</style>
 <script src="${external}script.js"></script>
+<script src="html-preview-probe/relative.js"></script>
+<link rel="stylesheet" href="html-preview-probe/relative.css">
 </head><body><h1>Quarterly report</h1>
 <div id="series"><div id="stylesheet-result">Revenue</div><div id="import-result">Costs</div></div>
 <p>Revenue increased across all regions.</p>
 <button id="open-top">Open outside preview</button>
 <a href="#report-details">Report details</a>
 <p id="report-details"></p>
-<img alt="Separate dot" src="${external}image.png"><img alt="Embedded dot" src="data:image/png;base64,${dot}">
+<img alt="Relative dot" src="html-preview-probe/relative.png"><img alt="Separate dot" src="${external}image.png"><img alt="Embedded dot" src="data:image/png;base64,${dot}">
 <script>
 const result = document.getElementById('report-details');
 const denied = (read) => { try { read(); return false; } catch { return true; } };
@@ -123,7 +126,7 @@ result.textContent = 'Chart data prepared';
 result.dataset.parent = String(denied(() => parent.document.body));
 result.dataset.cookie = String(denied(() => document.cookie));
 result.dataset.origin = origin;
-result.dataset.localBase = String(document.baseURI.startsWith('data:text/html;'));
+result.dataset.localBase = String(denied(() => new URL('relative.js', document.baseURI)));
 result.dataset.referrer = document.referrer;
 fetch(${JSON.stringify(api)}).then(
   () => { result.dataset.fetch = 'allowed'; },
@@ -189,6 +192,9 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           frame.getByRole("img", { name: "Separate dot" }),
         ).toHaveJSProperty("naturalWidth", 0);
         await browserExpect(
+          frame.getByRole("img", { name: "Relative dot" }),
+        ).toHaveJSProperty("naturalWidth", 0);
+        await browserExpect(
           frame.locator('link:not([rel="stylesheet"])'),
         ).toHaveCount(0);
         await browserExpect(preview).toHaveAttribute("aria-pressed", "true");
@@ -242,6 +248,164 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .waitFor();
         await showFilesList(page);
         await openListedFile(page, "large.html");
+        const largeHeading = details
+          .frameLocator("iframe")
+          .getByRole("heading", { name: "Large file" });
+        await largeHeading.waitFor();
+        await browserExpect(largeHeading).toBeVisible();
+        const largeUrl = (await details
+          .locator("iframe")
+          .getAttribute("src"))!.split("#")[0];
+        expect(largeUrl).toStartWith("blob:");
+        const commentButton = details.getByRole("button", {
+          name: "Comment on selection",
+        });
+        await browserExpect(commentButton).toBeEnabled();
+        await largeHeading.selectText();
+        await largeHeading.evaluate(() => {
+          const send = MessagePort.prototype.postMessage;
+          MessagePort.prototype.postMessage = function (
+            this: MessagePort,
+            data: any,
+          ) {
+            if (data.type === "selection") {
+              MessagePort.prototype.postMessage = send;
+              (window as any).lateSelection = () => send.call(this, data);
+            } else send.call(this, data);
+          } as typeof send;
+        });
+        await commentButton.click();
+        await details
+          .getByText("Reading selection…", { exact: true })
+          .waitFor();
+        const navigatingFrame = await (await details
+          .locator("iframe")
+          .elementHandle())!.contentFrame();
+        await largeHeading.evaluate(() => {
+          addEventListener("pagehide", () => (window as any).lateSelection(), {
+            once: true,
+          });
+          window.location.href = "about:blank";
+        });
+        await navigatingFrame!.waitForURL("about:blank");
+        await browserExpect(commentButton).toBeDisabled();
+        await browserExpect(
+          page.locator(".report-comment-popover"),
+        ).toBeHidden();
+        await details
+          .getByRole("button", { name: "Source", exact: true })
+          .click();
+        await browserExpect(details.locator("iframe")).toHaveCount(0);
+        await details
+          .getByRole("button", { name: "Preview", exact: true })
+          .click();
+        await browserExpect(commentButton).toBeEnabled();
+        await browserExpect(
+          page.locator(".report-comment-popover"),
+        ).toBeHidden();
+        await details
+          .frameLocator("iframe")
+          .locator("#late-a")
+          .evaluate((first) => {
+            const last = document.getElementById("late-b")!;
+            const range = document.createRange();
+            range.setStart(first.firstChild!, 0);
+            range.setEnd(last.firstChild!, last.textContent!.length);
+            getSelection()!.removeAllRanges();
+            getSelection()!.addRange(range);
+          });
+        await commentButton.click();
+        await browserExpect(
+          page.locator(".report-comment-popover blockquote"),
+        ).toHaveText("Late report selection");
+        await page
+          .locator(".report-comment-popover")
+          .getByRole("button", { name: "Cancel", exact: true })
+          .click();
+        if (width === 1280) await largeHeading.click({ clickCount: 3 });
+        else await largeHeading.selectText();
+        if (width === 412) {
+          await expectPhoneTapArea(commentButton);
+          await commentButton.tap();
+        } else await commentButton.press("Enter");
+        const popover = page.locator(".report-comment-popover");
+        await browserExpect(popover.locator("blockquote")).toHaveText(
+          "Large file",
+        );
+        const reply = `HTML selection confirmed ${width}`;
+        await popover.locator("textarea").fill(`Reply only ${reply}`);
+        await fileShot(page, `${width}-files-html-comment.png`);
+        await details
+          .getByRole("button", { name: "Source", exact: true })
+          .click();
+        await browserExpect(popover.locator("textarea")).toHaveValue(
+          `Reply only ${reply}`,
+        );
+        await browserExpect(details.locator(".report-comment")).toHaveCount(0);
+        await popover
+          .getByRole("button", { name: "Comment", exact: true })
+          .click();
+        await browserExpect(
+          details.locator(".report-comment blockquote"),
+        ).toHaveText("Large file");
+        expect(
+          (await details.locator(".files-source code").textContent())!.length,
+        ).toBeLessThanOrEqual(256 * 1024);
+        await details
+          .getByRole("button", { name: "Preview", exact: true })
+          .click();
+        const delivered = page.waitForRequest((request) =>
+          request.url().endsWith(`/api/conversations/${demo}/deliver`),
+        );
+        await details.getByRole("button", { name: "Submit comments" }).click();
+        const content = (await delivered).postDataJSON().content as string;
+        expect(content).toContain(`> Large file\nReply only ${reply}`);
+        expect(content).not.toContain("- line ");
+        await details.locator(".files-document").waitFor({ state: "detached" });
+        expect(
+          await page.evaluate(async (url) => {
+            try {
+              await fetch(url);
+              return true;
+            } catch {
+              return false;
+            }
+          }, largeUrl),
+        ).toBeFalse();
+        await page
+          .locator(".msg.assistant .content")
+          .getByText(reply, { exact: true })
+          .waitFor();
+        await openReplyFile(page, "report.html");
+        await details
+          .getByRole("button", { name: "Source", exact: true })
+          .click();
+        await dispatchArtifactSelection(
+          page,
+          width === 412 ? "touch" : "mouse",
+          "Quarterly report",
+          details.locator(".files-source"),
+        );
+        const sourceReply = `HTML source confirmed ${width}`;
+        await popover.locator("textarea").fill(`Reply only ${sourceReply}`);
+        await popover
+          .getByRole("button", { name: "Comment", exact: true })
+          .click();
+        const sourceDelivered = page.waitForRequest((request) =>
+          request.url().endsWith(`/api/conversations/${demo}/deliver`),
+        );
+        await details.getByRole("button", { name: "Submit comments" }).click();
+        const sourceAt = markup.indexOf("Quarterly report");
+        expect((await sourceDelivered).postDataJSON().content).toContain(
+          `- line ${markup.slice(0, sourceAt).split("\n").length}, chars ${sourceAt}-${sourceAt + "Quarterly report".length}:`,
+        );
+        await page
+          .locator(".msg.assistant .content")
+          .getByText(sourceReply, { exact: true })
+          .waitFor();
+        await openReplyFile(page, "report.html");
+        await showFilesList(page);
+        await openListedFile(page, "oversize.html");
         await browserExpect(
           details.getByRole("button", { name: "Preview" }),
         ).toBeDisabled();
@@ -249,9 +413,19 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           .getByText("This file is too large to preview.", { exact: false })
           .waitFor();
         await browserExpect(details.locator(".files-source")).toContainText(
-          "<h1>Large file</h1>",
+          "<h1>Oversize file</h1>",
         );
         await browserExpect(details.locator("iframe")).toHaveCount(0);
+        await showFilesList(page);
+        await openListedFile(page, "navigate.html");
+        await details
+          .frameLocator("iframe")
+          .getByText("Navigation complete", { exact: true })
+          .waitFor();
+        await browserExpect(
+          details.getByRole("button", { name: "Comment on selection" }),
+        ).toBeDisabled();
+        await browserExpect(popover).toBeHidden();
         for (const [name, text] of Object.entries(fallbackFiles)) {
           await showFilesList(page);
           await expectHtmlSourceFallback(details, code, text, () =>
@@ -260,13 +434,21 @@ window.addEventListener('hashchange', () => { result.dataset.section = location.
           hints.expectQuiet();
         }
         expect(outbound).toEqual([]);
+        const topDenied = (error: string) =>
+          error.startsWith(
+            `Unsafe attempt to initiate navigation for frame with URL '${location}' from frame with URL 'blob:${new URL(base).origin}/`,
+          ) &&
+          error.includes(
+            "'allow-top-navigation-by-user-activation' is not set",
+          );
+        expect(errors.some(topDenied)).toBeTrue();
         expect(
           errors.filter(
             (error) =>
+              !topDenied(error) &&
               !(
                 error.includes("html-preview-probe") &&
-                (error.includes("Content Security Policy") ||
-                  error.includes("Unsafe attempt to initiate navigation"))
+                error.includes("Content Security Policy")
               ),
           ),
         ).toEqual([]);

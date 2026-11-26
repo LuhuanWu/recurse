@@ -19,6 +19,11 @@ the same viewer.
 - [pane.ts](pane.ts) registers the pane and handles reply links. [index.ts](index.ts)
   is the public entry. [io.ts](io.ts) shares path and read helpers.
 
+HTML shares the [Files preview and selection bridge](../files/README.md#views).
+Preview accumulation is bounded independently of source/editor text; comments
+retain the loaded path and revision rather than interpreting rendered quotes as
+source lines. The viewer owns cancellation when its frame or mode changes.
+
 ## Rules for changes
 
 - Keep folder reads paged and the tree bounded. Cancel reads on leave; an aborted

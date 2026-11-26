@@ -196,6 +196,9 @@ popover.hidden = true;
 const popoverLabel = document.createElement("label");
 popoverLabel.id = "report-comment-label";
 popoverLabel.htmlFor = "report-selection-comment";
+const popoverQuote = document.createElement("blockquote");
+popoverQuote.className = "report-comment-preview-quote";
+popoverQuote.hidden = true;
 const popoverInput = document.createElement("textarea");
 popoverInput.id = "report-selection-comment";
 popoverInput.className = "text-field";
@@ -212,7 +215,7 @@ popoverComment.type = "button";
 popoverComment.className = "btn sm primary report-comment-popover-submit";
 popoverComment.textContent = "Comment";
 popoverActions.append(popoverCancel, popoverComment);
-popover.append(popoverLabel, popoverInput, popoverActions);
+popover.append(popoverLabel, popoverQuote, popoverInput, popoverActions);
 document.body.appendChild(popover);
 export function cancelSelectionComment(owner?: HTMLElement): void {
   if (owner && selectionCommentOwner() !== owner) return;
@@ -303,7 +306,12 @@ export function editingPendingComment(pane: CommentPane): boolean {
 }
 // Never stage a draft whose text/box left the page after a file/version swap.
 const draftDetached = (draft: SelectionDraft): boolean =>
-  !(draft.edit?.anchor ?? draft.mark ?? draft.range.startContainer).isConnected;
+  !(
+    draft.edit?.anchor ??
+    draft.frameQuote?.anchor ??
+    draft.mark ??
+    draft.range?.startContainer
+  )?.isConnected;
 function positionPopover(): void {
   if (selectionDraft && draftDetached(selectionDraft)) cancelSelectionComment();
   const draft = selectionDraft;
@@ -311,12 +319,16 @@ function positionPopover(): void {
     !draft ||
     draft.key !== currentCommentKey(draft.pane) ||
     !sourceIsCurrent(draft.source) ||
+    (draft.frameQuote &&
+      !draft.pane.checkVisibility({ checkVisibilityCSS: true })) ||
     draft.version !== displayedInfo(draft.pane)?.version
   ) {
     popover.hidden = true;
     return;
   }
-  const rects = (draft.edit?.anchor ?? draft.range).getClientRects();
+  const rects = (draft.edit?.anchor ??
+    draft.frameQuote?.anchor ??
+    draft.range)!.getClientRects();
   const rect = rects[rects.length - 1];
   if (!rect) {
     popover.hidden = true;
@@ -331,6 +343,8 @@ function positionPopover(): void {
     : "menu form report-comment-popover";
   popover.classList.toggle("editing", !!draft.edit);
   popoverInput.className = file ? "composer-input" : "text-field";
+  popoverQuote.hidden = !draft.frameQuote;
+  popoverQuote.textContent = draft.frameQuote ? draft.quote : "";
   popoverInput.rows = file ? 1 : 3;
   popoverInput.style.height = "";
   popoverLabel.className = draft.edit ? "" : "sr-only";
@@ -448,6 +462,7 @@ function offerSelectionComment(source: SelectionSource): void {
     selectionDraft.version === version &&
     selectionDraft.root === selected.root &&
     selectionDraft.source === selected.source &&
+    !!selectionDraft.range &&
     sameRange(selectionDraft.range, selected.range);
   if (!same) {
     selectionDraft?.mark?.remove();
@@ -537,6 +552,44 @@ export function offerBoxComment(
   positionPopover();
   popoverInput.focus({ preventScroll: true });
 }
+function offerFrameQuote(pane: CommentPane, event: Event): void {
+  const { quote, anchor, valid } = (
+    event as CustomEvent<{
+      quote: string;
+      anchor: HTMLElement;
+      valid: () => boolean;
+    }>
+  ).detail;
+  const key = currentCommentKey(pane);
+  const version = displayedInfo(pane)?.version;
+  if (
+    !key ||
+    !version ||
+    pane._rs.deleting ||
+    !pane.contains(anchor) ||
+    !valid() ||
+    !canReplaceDraft()
+  )
+    return;
+  cancelSelectionComment();
+  commentMount.current = pane;
+  setSelectionDraft({
+    pane,
+    key,
+    version,
+    root: pane,
+    source: mainSelectionSource,
+    range: null,
+    frameQuote: {
+      anchor: pane.querySelector<HTMLElement>(".html-file-modes") ?? anchor,
+    },
+    quote,
+  });
+  positionPopover();
+  commentPanes.get(pane)!.renderBar(pane);
+  popoverInput.focus({ preventScroll: true });
+}
+
 /** Artifact text comments use the floating editor for their pending entries. */
 export function canEditPendingComment(
   pane: CommentPane,
@@ -582,7 +635,9 @@ export function editPendingComment(
     version: comment.version,
     root: pane,
     source: mainSelectionSource,
-    range: comment.range,
+    ...(comment.frameQuote
+      ? { range: null, frameQuote: { anchor } }
+      : { range: comment.range }),
     quote: comment.quote,
     edit: { comment, anchor },
   });
@@ -662,6 +717,9 @@ export function claimComments(
 ): void {
   if (!commentPanes.has(pane)) {
     commentPanes.set(pane, rendering);
+    pane.addEventListener("recurse:frame-quote", (event) =>
+      offerFrameQuote(pane, event),
+    );
     pane.addEventListener("keydown", (event) => {
       handleCommentShortcut(event, pane);
       if (
@@ -814,6 +872,7 @@ function stageSelectionComment(allowEmpty = false, focusCard = true): void {
     draft.key !== id ||
     pane._rs.deleting ||
     !sourceIsCurrent(draft.source) ||
+    (draft.frameQuote && !pane.checkVisibility({ checkVisibilityCSS: true })) ||
     !displayed?.version ||
     draft.version !== displayed.version
   )
@@ -830,13 +889,18 @@ function stageSelectionComment(allowEmpty = false, focusCard = true): void {
     return;
   }
   const cid = `ac${++cidSeq}`;
-  const textRange = draft.box
-    ? undefined
-    : textOffsets(draft.range, commentRoot(pane));
-  const marks = draft.mark ? [draft.mark] : markRange(draft.range, cid);
+  const textRange =
+    draft.box || !draft.range
+      ? undefined
+      : textOffsets(draft.range, commentRoot(pane));
+  const marks = draft.mark
+    ? [draft.mark]
+    : draft.range
+      ? markRange(draft.range, cid)
+      : [];
   if (draft.mark) draft.mark.dataset.cid = cid;
   draft.mark = undefined;
-  if (!marks.length) {
+  if (!marks.length && !draft.frameQuote) {
     cancelSelectionComment();
     return;
   }
@@ -847,7 +911,9 @@ function stageSelectionComment(allowEmpty = false, focusCard = true): void {
     agentId: pane._rs.agentId!,
     artifactId: pane._rs.selId!,
     version: displayed.version,
-    range: draft.range.cloneRange(),
+    ...(draft.frameQuote
+      ? { range: null, frameQuote: true as const }
+      : { range: draft.range.cloneRange() }),
     quote: draft.quote,
     textRange,
     text: note,
@@ -970,7 +1036,7 @@ export function reanchor(
   if (!map || !key) return;
   const version = displayedInfo(pane)?.version;
   for (const comment of map.values()) {
-    if (comment.version !== version) continue;
+    if (comment.version !== version || comment.frameQuote) continue;
     const marker = `mark[data-cid="${comment.cid}"]`;
     const editable = canEditPendingComment(pane, comment);
     if (roots.some((root) => root.querySelector(marker))) {

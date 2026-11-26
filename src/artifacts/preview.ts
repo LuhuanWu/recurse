@@ -5,11 +5,13 @@ import { themedHtml } from "./theme";
 import { prependToHead } from "./page/index";
 import { ARTIFACT_KEY_RELAY } from "./key_relay";
 import { APP_STATE_SCRIPT } from "./app_state_script";
+import { PREVIEW_SELECTION_SCRIPT } from "../preview_selection_script";
 
 export function artifactPreview(html: string, css: string): string {
   return prependToHead(
     themedHtml(html, css),
-    APP_STATE_SCRIPT +
+    PREVIEW_SELECTION_SCRIPT +
+      APP_STATE_SCRIPT +
       ARTIFACT_KEY_RELAY +
       `<script id="recurse-preview-size">(()=>{
       if(parent===window)return;

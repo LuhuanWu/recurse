@@ -10,6 +10,7 @@ import {
 } from "../artifacts/index.js";
 import { commentMount } from "../comments/selection-draft/index.js";
 import { highlightSource } from "../source-preview.js";
+import { isHtmlFile } from "../html-file-view.js";
 import { cachedEntry } from "./collection.js";
 import { diffPending } from "./diff-preview.js";
 import type { SessionFile } from "./model.js";
@@ -54,7 +55,12 @@ export function syncComments(
   syncSelectionDraft();
   const pending = file && diffPending(cachedEntry(cid)?.previews.get(file.key));
   if (pending) void pending.then(() => diffReady(element, cid));
-  const doc = file?.id && element.querySelector(".report-doc") ? file : null;
+  const doc =
+    file?.id &&
+    (element.querySelector(".report-doc") ||
+      (file.preview === "document" && isHtmlFile(file.name)))
+      ? file
+      : null;
   // Invariant: Mutated in place: an in-flight send clears the flags on the
   // object it started with.
   element._rs ??= createCommentState(cid);

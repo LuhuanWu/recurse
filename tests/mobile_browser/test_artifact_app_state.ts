@@ -78,6 +78,21 @@ export const tests: BrowserTest[] = [
         .evaluate((_, data) => {
           const channel = new MessageChannel();
           window.parent.postMessage(data, "*", [channel.port2]);
+          const selection = new MessageChannel();
+          selection.port1.onmessage = ({ data }) =>
+            selection.port1.postMessage({
+              type: "selection",
+              request: data.request,
+              quote: "Wrong window",
+            });
+          window.parent.postMessage(
+            {
+              type: "recurse-preview-selection:connect",
+              token: `recurse-app-state=${data.token}`,
+            },
+            "*",
+            [selection.port2],
+          );
           channel.port1.postMessage({
             type: "save",
             json: '{"attendees":99}',
@@ -142,6 +157,97 @@ export const tests: BrowserTest[] = [
       output: { type: "text", text: "null" },
     });
     await page.reload();
+    await browserExpect(count).toHaveText("3");
+    const commentButton = page.getByRole("button", {
+      name: "Comment on selection",
+    });
+    const heading = frame.getByRole("heading").first();
+    const quote = (await heading.textContent())!.trim();
+    const popover = page.locator(".report-comment-popover");
+    await browserExpect(commentButton).toBeEnabled();
+    await heading.selectText();
+    await heading.evaluate(() => {
+      const send = MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage = function (
+        this: MessagePort,
+        data: any,
+      ) {
+        if (data.type === "selection") {
+          MessagePort.prototype.postMessage = send;
+          send.call(this, { ...data, send: true });
+          send.call(this, { ...data, type: "save" });
+          send.call(this, { ...data, quote: "x".repeat(601) });
+        } else send.call(this, data);
+      } as typeof send;
+    });
+    await commentButton.click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Couldn’t read the selection" })
+      .waitFor();
+    await browserExpect(popover).toBeHidden();
+    await heading.selectText();
+    await heading.evaluate(() => {
+      const send = MessagePort.prototype.postMessage;
+      let late: (() => void) | undefined;
+      addEventListener("pagehide", () => late?.(), { once: true });
+      MessagePort.prototype.postMessage = function (
+        this: MessagePort,
+        data: any,
+      ) {
+        if (data.type === "selection") {
+          MessagePort.prototype.postMessage = send;
+          late = () => send.call(this, data);
+        } else send.call(this, data);
+      } as typeof send;
+    });
+    await commentButton.click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Reading selection…" })
+      .waitFor();
+    const firstSrc = await locator.getAttribute("src");
+    await page.evaluate(() =>
+      dispatchEvent(new Event("recurse:theme-changed")),
+    );
+    await browserExpect(locator).not.toHaveAttribute("src", firstSrc!);
+    await browserExpect(count).toHaveText("3");
+    await browserExpect(commentButton).toBeEnabled();
+    await browserExpect(popover).toBeHidden();
+    await heading.selectText();
+    await commentButton.press("Enter");
+    await browserExpect(popover.locator("blockquote")).toHaveText(quote);
+    await popover
+      .locator("textarea")
+      .fill("Reply only HTML Artifact comment received");
+    const draftSrc = await locator.getAttribute("src");
+    await page.evaluate(() =>
+      dispatchEvent(new Event("recurse:theme-changed")),
+    );
+    await browserExpect(locator).not.toHaveAttribute("src", draftSrc!);
+    await browserExpect(count).toHaveText("3");
+    await browserExpect(popover.locator("textarea")).toHaveValue(
+      "Reply only HTML Artifact comment received",
+    );
+    await browserExpect(page.locator(".report-comment")).toHaveCount(0);
+    await popover.getByRole("button", { name: "Comment", exact: true }).click();
+    await browserExpect(page.locator(".report-comment-quote")).toHaveText(
+      quote,
+    );
+    const delivered = page.waitForRequest((request) =>
+      request.url().endsWith(`/api/conversations/${rootAgentId()}/deliver`),
+    );
+    await page.getByRole("button", { name: "Submit comments" }).click();
+    const message = (await delivered).postDataJSON().content as string;
+    expect(message).toContain(
+      `> ${quote}\nReply only HTML Artifact comment received`,
+    );
+    expect(message).toContain(`id: ${app.id}, version:`);
+    expect(message).not.toContain("- line ");
+    await page
+      .locator(".msg.assistant .content")
+      .getByText("HTML Artifact comment received", { exact: true })
+      .waitFor();
     await browserExpect(count).toHaveText("3");
     const { promise: resumeReads, resolve: resume } =
       Promise.withResolvers<void>();

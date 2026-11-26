@@ -46,8 +46,8 @@ chat: long cells wrap, and tables scroll only when their columns cannot fit.
 Uploaded and published HTML and Explorer HTML use the Artifact app isolation.
 Source shows highlighted markup; Preview runs inline scripts and styles and
 loads embedded data images, fonts and media. Separate files do not load as
-subresources, even when adjacent to the HTML. Its document URL does not inherit
-the enclosing Recurse URL. Preview cannot read the Recurse page, cookies or API,
+subresources, even when adjacent to the HTML. Its revocable Blob URL avoids
+browser data-URL length limits without resolving relative files against Recurse. Preview cannot read the Recurse page, cookies or API,
 open popups, submit forms or navigate the Recurse page.
 Resource hints in the original HTML are removed before rendering. Because the
 filter's parser can interpret markup differently from Chromium, a second check
@@ -56,9 +56,18 @@ file opens as Source, even if the match was only in a comment. Scripts can still
 deliberately add hints at runtime, and a link or script can navigate the preview
 frame itself. Either can contact another host and disclose the file's own
 content or that it was opened.
-Files larger than 256 KiB open as source with the first 256 KiB and a Download
-action for the rest. If HTML is too complex to prepare safely, Preview is
-unavailable and the file opens as Source.
+HTML preview and source have independent bounds in
+[html-file-view.ts](../html-file-view.ts): the larger preview budget admits
+self-contained reports without expanding the editor or source DOM. The
+[worker](../document-preview.worker.ts) owns parsing and cancellation; failures
+keep bounded Source and Download available.
+
+The [selection bridge](../html-preview-comments.ts) keeps HTML comments in the
+trusted parent, separate from the opaque document. Comment on selection opens
+a quoted snapshot in the existing editor; the frame cannot stage or send it.
+Snapshots deliberately have no HTML line offsets or live in-frame highlights.
+Changing Source/Preview keeps the typed snapshot, but destroys the old frame's
+connection; the next preview gets a fresh nonce. Final disposal revokes its Blob URL.
 
 Modified clicks and unsupported types retain browser navigation. Inline image enlargement
 retains its dialog on both layouts. Single-key shortcuts close image dialogs

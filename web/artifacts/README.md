@@ -26,6 +26,13 @@ link-only highlights. Save updates the comment; Cancel or Escape keeps its text.
 Finish editing before sending. Cmd/Ctrl+Enter stages a draft without opening the
 list and focuses the viewer; press again to send.
 
+HTML apps share the [Files selection bridge](../html-preview-comments.ts).
+Their comments are quoted snapshots, not live DOM ranges: app changes cannot
+silently move a quote to different text. The trusted parent owns the editor,
+revision and outbox; the iframe only answers bounded selection requests.
+Reloading an app preserves a typed quote snapshot, even when the new app text
+no longer matches it; changing the selected source or revision does not.
+
 ## Submission and navigation
 
 Submission keeps the Artifact pane or tab open; other viewers close. Reopening

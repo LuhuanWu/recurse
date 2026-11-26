@@ -245,8 +245,16 @@ export function routes(fx: Fixture): Routes {
         await publishFiles(cid, {
           "report.html": html,
           ...fallbackFiles,
-          "large.html": `<h1>Large file</h1>${"<p>Large report paragraph.</p>\n".repeat(12_000)}`,
+          "large.html": `<h1>Large file</h1>${"<p>Large report paragraph.</p>\n".repeat(12_000)}<p id="late-a">Late report</p><p id="late-b"> selection</p><!--${"x".repeat(2 * 1024 * 1024)}-->`,
+          "oversize.html": `<h1>Oversize file</h1><!--${"x".repeat(8 * 1024 * 1024)}-->`,
+          "navigate.html": `<script>location.replace(${JSON.stringify("data:text/html," + encodeURIComponent("<p>Navigation complete</p><script>const c=new MessageChannel();c.port1.onmessage=({data})=>c.port1.postMessage({type:'selection',request:data.request,quote:'Navigated quote'});parent.postMessage({type:'recurse-preview-selection:connect',token:location.hash.slice(1)},'*',[c.port2]);</script>"))}+location.hash)</script>`,
         });
+        script(cid).appendResponses(
+          [1280, 412].flatMap((width) => [
+            fauxAssistantMessage(`HTML selection confirmed ${width}`),
+            fauxAssistantMessage(`HTML source confirmed ${width}`),
+          ]),
+        );
       });
       return { demo: cid };
     },

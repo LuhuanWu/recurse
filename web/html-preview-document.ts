@@ -1,6 +1,7 @@
 // Ordinary HTML previews are separate documents, never mounted in the app DOM.
 import { Parser, type DefaultTreeAdapterMap, type Token } from "parse5";
 import { ARTIFACT_APP_FRAME_CSP } from "../src/artifacts/index.js";
+import { PREVIEW_SELECTION_SCRIPT } from "../src/preview_selection_script.js";
 
 const hints = new Set([
   "dns-prefetch",
@@ -16,6 +17,7 @@ const MAX_OPEN_ELEMENTS = 128;
 class HintFilter extends Parser<DefaultTreeAdapterMap> {
   private readonly parts: string[] = [];
   private end = 0;
+  private elements = 0;
 
   constructor(private readonly markup: string) {
     super({ sourceCodeLocationInfo: true, scriptingEnabled: true });
@@ -33,6 +35,8 @@ class HintFilter extends Parser<DefaultTreeAdapterMap> {
 
   override onStartTag(token: Token.TagToken): void {
     this.checkBudget();
+    if (++this.elements > 40_000)
+      throw new Error("HTML preview parse budget exceeded");
     const rel =
       token.tagName === "link" && token.attrs.find((a) => a.name === "rel");
     if (
@@ -59,16 +63,15 @@ class HintFilter extends Parser<DefaultTreeAdapterMap> {
 }
 
 /** Embed an ordinary HTML file in a frame sandboxed with only allow-scripts. */
-export function htmlAppPreviewUrl(source: string): string {
+export function htmlAppPreviewMarkup(source: string): string {
   const markup =
     `<!doctype html><meta http-equiv="Content-Security-Policy" content="${ARTIFACT_APP_FRAME_CSP}">` +
     `<meta name="referrer" content="no-referrer">` +
+    PREVIEW_SELECTION_SCRIPT +
     source.replace(/^\uFEFF?\s*<!doctype\s+html\s*>/i, "");
   // Invariant: Drop static hints before Chromium's speculative loader can see
   // them. A non-DOM parser preserves author markup and cannot fetch resources.
-  const filtered = /<link(?=[\t\n\f\r />])/i.test(markup)
-    ? new HintFilter(markup).filtered()
-    : markup;
+  const filtered = new HintFilter(markup).filtered();
   // Invariant: The browser may tokenize differently; a remaining hint-like
   // attribute falls back to Source even when the parser treated it as text.
   if (
@@ -77,5 +80,5 @@ export function htmlAppPreviewUrl(source: string): string {
     )
   )
     throw new Error("HTML preview contains a remaining resource hint");
-  return `data:text/html;charset=utf-8,${encodeURIComponent(filtered)}`;
+  return filtered;
 }

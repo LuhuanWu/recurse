@@ -247,9 +247,15 @@ self.onmessage = async (
 ) => {
   try {
     if ("markup" in event.data) {
-      const { htmlAppPreviewUrl } = await import("./html-preview-document.js");
+      if (
+        event.data.markup.length > MAX_INPUT ||
+        new TextEncoder().encode(event.data.markup).byteLength > MAX_INPUT
+      )
+        throw Error("This file is too large to preview.");
+      const { htmlAppPreviewMarkup } =
+        await import("./html-preview-document.js");
       self.postMessage({ started: true });
-      self.postMessage({ result: htmlAppPreviewUrl(event.data.markup) });
+      self.postMessage({ result: htmlAppPreviewMarkup(event.data.markup) });
       return;
     }
     if (typeof event.data.text === "string") {

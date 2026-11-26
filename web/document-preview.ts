@@ -6,6 +6,7 @@ import { html, nothing, render } from "lit";
 import { htmlPreviewSrcdoc } from "./document-media/index.js";
 import {
   htmlFileModes,
+  htmlSourceText,
   HTML_OFFLINE_NOTE,
   HTML_PREVIEW_FAILED,
   HTML_TOO_LARGE,
@@ -13,6 +14,11 @@ import {
   MAX_HTML_PREVIEW_BYTES,
 } from "./html-file-view.js";
 import { highlightSource } from "./source-preview.js";
+import {
+  htmlPreviewFragment,
+  htmlPreviewComments,
+  resetHtmlComments,
+} from "./html-preview-comments.js";
 
 export interface DocumentSection {
   title: string;
@@ -236,13 +242,26 @@ function display(
 export async function htmlFileFrame(
   markup: string,
   title: string,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<HTMLIFrameElement> {
   const frame = documentFrame(`Preview of ${title}`);
   if (!("sandbox" in frame)) throw Error(HTML_PREVIEW_FAILED);
   frame.classList.add("html-file-frame");
   frame.setAttribute("sandbox", "allow-scripts");
-  frame.src = await documentWork<string>({ markup }, signal);
+  const filtered = await documentWork<string>({ markup }, signal);
+  signal.throwIfAborted();
+  const url = URL.createObjectURL(
+    new Blob([filtered], { type: "text/html;charset=utf-8" }),
+  );
+  frame.src = url + htmlPreviewFragment();
+  signal.addEventListener(
+    "abort",
+    () => {
+      frame.remove();
+      URL.revokeObjectURL(url);
+    },
+    { once: true },
+  );
   return frame;
 }
 
@@ -264,8 +283,19 @@ async function displayHtml(
   }
   if (signal.aborted) return;
   const root = document.createElement("div");
+  const controls = frame ? htmlPreviewComments(frame, signal) : nothing;
+  const shown = htmlSourceText(markup);
   container.replaceChildren(root);
+  const url = frame?.src.split("#")[0];
+  let showing: boolean | undefined;
   const select = (preview: boolean) => {
+    if (showing === preview) return;
+    showing = preview;
+    if (frame) {
+      const fragment = preview ? htmlPreviewFragment() : undefined;
+      resetHtmlComments(frame, fragment);
+      if (fragment) frame.src = url + fragment;
+    }
     render(
       html`${htmlFileModes(preview, !!reason, select)}
       ${preview || reason
@@ -277,11 +307,16 @@ async function displayHtml(
           </p>`
         : nothing}
       ${preview
-        ? frame
+        ? html`${controls}${frame}`
         : html`<pre
-            class="report-doc files-source"
-            tabindex="0"
-          ><code>${markup}</code></pre>`}`,
+              class="report-doc files-source"
+              tabindex="0"
+            ><code>${shown}</code></pre>
+            ${shown.length < markup.length
+              ? html`<p class="files-preview-note">
+                  Source truncated. Download the file to read the rest.
+                </p>`
+              : nothing}`}`,
       root,
     );
     if (!preview) highlightSource(root.querySelector("code")!, title);

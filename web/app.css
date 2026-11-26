@@ -518,6 +518,23 @@ ins.doc-diff-added { color: inherit; text-decoration: none;
   border: 0;
   background: var(--panel);
 }
+.html-preview-comments {
+  user-select: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.html-preview-comments [role="status"] { color: var(--muted); }
+.report-comment-preview-quote {
+  max-height: 20dvh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border);
+}
 .html-file-modes {
   display: flex;
   gap: var(--space-3);
@@ -534,7 +551,7 @@ ins.doc-diff-added { color: inherit; text-decoration: none;
   color: var(--muted);
 }
 @media (pointer: coarse) {
-  .html-file-modes .btn.sm {
+  .html-file-modes .btn.sm, .html-preview-comments .btn.sm {
     min-height: 44px;
     min-width: 44px;
   }
