@@ -2,7 +2,11 @@
 // Navigation retains every owner payload; only this registry pins draft owners.
 import type { Draft, DraftCreator } from "../types.js";
 import { state, visibleAgent } from "../state.js";
-import { transferStagedAttachmentOwner } from "../attachments.js";
+import { inputEl } from "../dom.js";
+import {
+  hasStagedAttachments,
+  transferStagedAttachmentOwner,
+} from "../attachments.js";
 import { conversationUiState } from "../conversation-ui-state/index.js";
 import {
   discardComposerOwner,
@@ -35,6 +39,20 @@ export function retainDraft(draft: Draft): boolean {
   conversationUiState.retainDraftOwner(draft.uiStateId);
   drafts.set(draft.uiStateId, draft);
   return true;
+}
+
+export function releaseEmptyDraft(next?: Draft): void {
+  const draft = state.draft;
+  if (
+    draft &&
+    draft !== next &&
+    !draft.creator &&
+    !inputEl.value.trim() &&
+    !hasStagedAttachments()
+  ) {
+    drafts.delete(draft.uiStateId);
+    discardComposerOwner(draft.uiStateId);
+  }
 }
 
 export function canDiscardDraft(draft: Draft): boolean {

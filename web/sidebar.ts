@@ -72,6 +72,7 @@ import { pendingSavedRecovery } from "./composer/index.js";
 import {
   newAgentDrafts,
   retainDraft,
+  releaseEmptyDraft,
   discardDraft,
   draftRow,
 } from "./new-agent-drafts/index.js";
@@ -384,6 +385,8 @@ function rowT(
     const draft = e.draftRow;
     return draftRow(draft, {
       selected: state.draft === draft,
+      style: pad,
+      level: e.depth + 1,
       parentTitle: draft.parent ? state.nodes[draft.parent]?.title : undefined,
       open: () => openDraft(draft),
       discard: () => {
@@ -626,8 +629,10 @@ export function openDraft(draft: Draft): void {
     alert("Wait for your recovered message to load before opening a draft.");
     return;
   }
-  if (!guardLeaveComments() || !retainDraft(draft)) return;
+  if (!guardLeaveComments()) return;
   snapshotComposerOwner(currentUiOwnerId());
+  releaseEmptyDraft(draft);
+  if (!retainDraft(draft)) return;
   window.dispatchEvent(new Event("recurse:selection-change"));
   state.draft = draft;
   state.selectedId = DRAFT;
@@ -663,6 +668,7 @@ export function selectAgent(
     preserveAttachments &&
     !skipComposerSnapshot &&
     state.draft?.creator?.convId === id;
+  releaseEmptyDraft();
   state.draft = null;
   noteSelection(id);
   state.selectedId = id;

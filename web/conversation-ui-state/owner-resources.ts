@@ -1,9 +1,7 @@
-// Opaque per-owner browser resources (File objects, object URLs, pending work)
-// that cannot be serialized but share the session owner's exact bounded
-// lifecycle: promotion transfers them, removal/eviction disposes them, and no
-// caller gets an owner-named storage namespace or an unbounded side map.
-// The store's pin predicate protects the separately bounded retained drafts;
-// ordinary saved and ephemeral owners still compete for the same cache limit.
+// Opaque per-owner browser resources share the bounded session-owner lifecycle.
+// Promotion transfers; removal/eviction disposes. No owner-named storage/side maps.
+// Store pins protect the separately bounded retained drafts; ordinary saved and
+// ephemeral owners still compete for the same cache limit.
 import { MAX_RETAINED_OWNERS } from "./schema.js";
 
 export interface OwnerResourceStore<T> {

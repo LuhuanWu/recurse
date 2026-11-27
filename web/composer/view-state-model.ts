@@ -123,6 +123,12 @@ export class ComposerViewStateController {
   discard(ownerId: string): void {
     this.volatile.delete(ownerId);
     this.store.remove(ownerId);
+    // Do not snapshot the discarded owner again during the following switch.
+    if (this.ownerId === ownerId) {
+      this.ownerId = "";
+      this.field.value = "";
+      this.field.setSelectionRange(0, 0);
+    }
   }
 
   clear(ownerId: string): boolean {

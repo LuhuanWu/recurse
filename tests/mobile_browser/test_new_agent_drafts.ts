@@ -242,6 +242,16 @@ export const tests: BrowserTest[] = [
       export default rows => [{ title: "Draft work", rows, actions: [{ label: "New agent", start: true, set: "draftwork" }] }];`;
     await postFixture(base, "save-sidebar-script", { script, by: "operator" });
     let refused = true;
+    let refuseDelivery = false;
+    const refusedDeliveries: unknown[] = [];
+    await page.route(`${base}api/conversations/*/deliver`, async (route) => {
+      if (!refuseDelivery) return route.continue();
+      refusedDeliveries.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 422,
+        json: { detail: "Delivery refused for this regression" },
+      });
+    });
     const creations: unknown[] = [];
     await page.route(`${base}api/conversations`, async (route) => {
       creations.push(route.request().postDataJSON());
@@ -294,26 +304,66 @@ export const tests: BrowserTest[] = [
       const createdId = await page
         .locator(".agent.selected")
         .getAttribute("data-id");
-      refused = true;
+      refuseDelivery = true;
       await startNewAgent(page);
-      await page
-        .locator("#input")
-        .fill("Discard failed creation without retry");
+      await page.locator("#input").fill("Discard failed draft without retry");
       await page.locator("#send").click();
       await browserExpect(page.locator("#send-status")).toContainText(
-        "Creation refused",
+        "Delivery refused",
       );
+      await page.locator(`.agent[data-id="${savedId}"]`).click();
+      await page
+        .getByRole("button", {
+          name: "Resume draft: Discard failed draft without retry",
+          exact: true,
+        })
+        .click();
+      const followerRefusal = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/deliver") && response.status() === 422,
+      );
+      await page.locator("#input").fill("Discard this related follow-up too");
+      await page.locator("#send").click();
+      await followerRefusal;
+      await browserExpect(
+        page.getByRole("button", {
+          name: "Discard draft: Discard failed draft without retry",
+          exact: true,
+        }),
+      ).toBeEnabled();
+      expect(
+        await page.evaluate(
+          () =>
+            Object.keys(localStorage).filter((key) =>
+              key.startsWith("recurse-composer-outbox-v1:"),
+            ).length,
+        ),
+      ).toBe(0);
       await page.locator(`.agent[data-id="${savedId}"]`).click();
       page.once("dialog", (dialog) => dialog.accept());
       await page
         .getByRole("button", {
-          name: "Discard draft: Discard failed creation without retry",
+          name: "Discard draft: Discard failed draft without retry",
           exact: true,
         })
         .click();
       await browserExpect(page.locator(".draft-row")).toHaveCount(0);
       await browserExpect(page.locator("#send-status")).toBeHidden();
       expect(creations).toHaveLength(3);
+      expect(refusedDeliveries).toHaveLength(2);
+      await page.reload();
+      await page.locator(`.agent.selected[data-id="${savedId}"]`).waitFor();
+      await browserExpect(page.locator("#send-status")).toBeHidden();
+      await browserExpect(page.locator(".draft-row")).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          () =>
+            Object.keys(localStorage).filter((key) =>
+              key.startsWith("recurse-composer-outbox-v1:"),
+            ).length,
+        ),
+      ).toBe(0);
+      expect(refusedDeliveries).toHaveLength(2);
       await page.request.delete(`${base}api/conversations/${createdId}`);
     } finally {
       await page.close();
@@ -360,6 +410,19 @@ export const tests: BrowserTest[] = [
           .locator(".agent.selected")
           .getAttribute("data-id");
         if (draft) await startNewAgent(page);
+        else {
+          await startNewAgent(page);
+          await page.locator("#input").fill(" \n");
+          await page.locator(`.agent[data-id="${savedId}"]`).click();
+          await browserExpect(page.locator(".draft-row")).toHaveCount(0);
+          expect(
+            await page.evaluate(() =>
+              dispatchEvent(
+                new Event("recurse:update-ready", { cancelable: true }),
+              ),
+            ),
+          ).toBe(true);
+        }
         await page.locator("#input").fill("Keep this through login");
         expired = true;
         await page.evaluate(() => dispatchEvent(new Event("focus")));

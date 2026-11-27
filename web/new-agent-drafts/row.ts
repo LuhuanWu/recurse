@@ -1,5 +1,6 @@
 // Draft rows expose distinct resume/discard actions without creating agents.
 import { html, nothing, type TemplateResult } from "lit";
+import type { styleMap } from "lit/directives/style-map.js";
 import type { Draft } from "../types.js";
 import { conversationUiState } from "../conversation-ui-state/index.js";
 import { canDiscardDraft } from "./drafts.js";
@@ -8,6 +9,8 @@ export function draftRow(
   draft: Draft,
   actions: {
     selected: boolean;
+    style: ReturnType<typeof styleMap>;
+    level: number;
     parentTitle?: string;
     open: () => void;
     discard: () => void;
@@ -23,7 +26,8 @@ export function draftRow(
     data-theme="sidebar-row"
     role="treeitem"
     aria-label=${`Draft: ${title}`}
-    aria-level="1"
+    aria-level=${actions.level}
+    style=${actions.style}
     aria-selected=${String(actions.selected)}
   >
     <button

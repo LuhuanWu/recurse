@@ -2,6 +2,7 @@
 export {
   newAgentDrafts,
   retainDraft,
+  releaseEmptyDraft,
   discardDraft,
   createdDraft,
   finishDraft,

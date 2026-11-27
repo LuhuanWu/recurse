@@ -176,6 +176,8 @@ let jobs: SendJob[] = [];
 setDraftSendCancellation(
   (draft) => {
     if (!draft.creator) return;
+    // Draft creators/followers are memory-only. Independent saved-agent sends
+    // may share their destination, but own their outbox entries and are not ours.
     const cancelled = jobs.filter(
       (job) => job === draft.creator || job.waitFor === draft.creator,
     );
@@ -428,7 +430,7 @@ function setSendStatus(msg: string, kind?: string): void {
 // Aggregate the jobs' states into the single status line: a failed batch (tap
 // to retry), else any in-progress reconnection, else nothing on the fast path.
 function renderSendStatus(): void {
-  renderSidebar();
+  if (newAgentDrafts().length) renderSidebar();
   // Invariant: A real send owns the shared status surface from here; a late
   // response from an earlier command must not overwrite its retry/error state.
   composerCommandStatusKey = null;

@@ -1,8 +1,7 @@
 // Owns per-conversation view state across local and session retention tiers.
-// codec.ts interprets untrusted bytes; persistence.ts reserves, repairs and
-// commits slots over this store's state. The bounded new-agent draft registry
-// pins its memory-only owners against eviction and storage invalidation until
-// explicit discard or promotion; ordinary ephemeral owners remain evictable.
+// codec validates bytes; persistence reserves, repairs and commits state slots.
+// Bounded retained drafts pin memory-only owners against eviction and storage
+// invalidation until discard/promotion; ordinary ephemeral owners are evictable.
 import {
   FLUSH_DELAY_MS,
   LEGACY_PANE_PREFIX,
