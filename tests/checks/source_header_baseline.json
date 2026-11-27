@@ -38,7 +38,6 @@
   "web/comments/box/index.ts",
   "web/comments/selection-draft/index.ts",
   "web/comments/selection-text/index.ts",
-  "web/composer/index.ts",
   "web/connection/index.ts",
   "web/conversation-ui-state/index.ts",
   "web/conversation/cache/index.ts",
