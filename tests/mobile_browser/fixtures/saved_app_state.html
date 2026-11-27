@@ -31,4 +31,10 @@
   document.getElementById("oversize").onclick = () => save("ä".repeat(131072));
   document.getElementById("invalid").onclick = () =>
     save({ attendee: undefined });
+  for (let n = 0; n < 160; n++) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent =
+      n === 120 ? "Lower document selection" : `Document paragraph ${n}`;
+    document.body.appendChild(paragraph);
+  }
 </script>

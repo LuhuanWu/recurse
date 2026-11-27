@@ -30,6 +30,8 @@ HTML apps share the [Files selection bridge](../html-preview-comments.ts).
 Their comments are quoted snapshots, not live DOM ranges: app changes cannot
 silently move a quote to different text. The trusted parent owns the editor,
 revision and outbox; the iframe only answers bounded selection requests.
+The [sticky selection controls](style.css) stay in the trusted parent while
+long app documents scroll, below revealed phone headers and above the preview.
 Reloading an app preserves a typed quote snapshot, even when the new app text
 differs from it; changing the selected source or revision does not.
 

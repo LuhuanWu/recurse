@@ -1,4 +1,11 @@
-/* Document page navigation in the shared Artifact pane. */
+/* Document navigation and persistent HTML selection controls in the Artifact pane. */
+.artifact-view .html-preview-comments {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  flex: none;
+  background: var(--panel);
+}
 .artifact-page-nav {
   display: flex;
   align-items: center;
@@ -20,6 +27,12 @@
   height: 16px;
 }
 @media (max-width: 700px) {
+  #panes.overlay .artifact-view .html-preview-comments {
+    top: calc(var(--mobile-shell-height) + var(--pane-powerbar-height));
+  }
+  body.pane-chrome-hidden #panes.overlay .artifact-view .html-preview-comments {
+    top: env(safe-area-inset-top);
+  }
   #panes.overlay .pane-col[data-pane="report"] {
     scroll-padding-top: calc(
       var(--mobile-shell-height) + var(--pane-powerbar-height)

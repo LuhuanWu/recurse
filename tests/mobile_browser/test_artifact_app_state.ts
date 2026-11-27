@@ -3,6 +3,8 @@ import { expect as browserExpect } from "playwright/test";
 import { type ToolResultMessage } from "@earendil-works/pi-ai";
 import {
   postFixture,
+  openPage,
+  screenshot,
   rootAgentId,
   runBrowserTests,
   type BrowserTest,
@@ -21,6 +23,111 @@ export const tests: BrowserTest[] = [
   async function test_saved_app_state(browser, base) {
     const app = await postFixture(base, "seed-saved-app-state");
     const other = await postFixture(base, "seed-saved-app-state");
+    for (const phone of [false, true]) {
+      const {
+        page: reader,
+        context,
+        errors,
+      } = await openPage(browser, {
+        viewport: { width: phone ? 412 : 1280, height: 844 },
+        touch: phone,
+      });
+      await reader.request.post(`${base}api/settings/theme`, {
+        data: { theme: phone ? "Material Dark" : "GitHub Light" },
+      });
+      await reader.goto(`${base}#agent=${rootAgentId()}&artifact=${app.id}`);
+      const preview = reader.locator("iframe.artifact-embed-page");
+      const lower = preview
+        .contentFrame()
+        .getByText("Lower document selection");
+      const action = reader.getByRole("button", {
+        name: "Comment on selection",
+      });
+      const editor = reader.locator(".report-comment-popover");
+      await browserExpect(action).toBeEnabled();
+      await action.focus();
+      await reader.keyboard.press("Tab");
+      await reader.keyboard.press("Shift+Tab");
+      await browserExpect(action).toBeFocused();
+      await lower.scrollIntoViewIfNeeded();
+      const scroller = reader.locator(
+        phone
+          ? '.pane-col[data-pane="report"]'
+          : '.pane-body[data-pane="report"]',
+      );
+      expect(
+        await scroller.evaluate((element) => element.scrollTop),
+      ).toBeGreaterThan(2000);
+      await browserExpect(action).toBeInViewport();
+      for (const reveal of [false, true]) {
+        if (reveal)
+          await scroller.evaluate((element) => element.scrollBy(0, -80));
+        await browserExpect(action).toBeInViewport();
+        await browserExpect
+          .poll(() =>
+            action.evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              return [
+                [box.left + 8, box.top + 8],
+                [box.right - 8, box.top + 8],
+                [box.left + 8, box.bottom - 8],
+                [box.right - 8, box.bottom - 8],
+              ].every(([x, y]) =>
+                element.contains(document.elementFromPoint(x!, y!)),
+              );
+            }),
+          )
+          .toBe(true);
+      }
+      expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(
+        phone ? 44 : 36,
+      );
+      await lower.selectText();
+      if (phone) await action.tap();
+      else await action.click();
+      await browserExpect(editor.locator("blockquote")).toHaveText(
+        "Lower document selection",
+      );
+      await reader.keyboard.press("Escape");
+      await browserExpect(editor).toBeHidden();
+      await lower.selectText();
+      await action.focus();
+      await reader.keyboard.press("Enter");
+      await browserExpect(editor.locator("blockquote")).toHaveText(
+        "Lower document selection",
+      );
+      expect(
+        await scroller.evaluate((element) => element.scrollTop),
+      ).toBeGreaterThan(2000);
+      const reply = `Lower HTML comment received ${phone ? "phone" : "desktop"}`;
+      await editor.locator("textarea").fill(`Reply only ${reply}`);
+      await screenshot(reader, `persistent-html-${phone ? 412 : 1280}-editor`);
+      await editor
+        .getByRole("button", { name: "Comment", exact: true })
+        .click();
+      await lower.scrollIntoViewIfNeeded();
+      await browserExpect(action).toBeInViewport();
+      const submit = reader.getByRole("button", { name: "Submit comments" });
+      await browserExpect(submit).toBeInViewport();
+      const actionBox = (await action.boundingBox())!;
+      const submitBox = (await submit.boundingBox())!;
+      expect(actionBox.y + actionBox.height).toBeLessThan(submitBox.y);
+      await screenshot(reader, `persistent-html-${phone ? 412 : 1280}-staged`);
+      const delivery = reader.waitForRequest((request) =>
+        request.url().endsWith(`/api/conversations/${rootAgentId()}/deliver`),
+      );
+      await submit.click();
+      const sent = (await delivery).postDataJSON().content as string;
+      expect(sent).toContain(`> Lower document selection\nReply only ${reply}`);
+      expect(sent).toContain(`id: ${app.id}, version:`);
+      expect(sent).not.toContain("- line ");
+      await reader
+        .locator(".msg.assistant .content")
+        .getByText(reply, { exact: true })
+        .waitFor({ state: "attached" });
+      expect(errors).toEqual([]);
+      await context.close();
+    }
     const page = await browser.newPage({
       viewport: { width: 1280, height: 844 },
     });
