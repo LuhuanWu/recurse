@@ -37,6 +37,7 @@ import {
 import {
   selectAgent,
   openDraft,
+  renderSidebar,
   asHistoryCorrection,
   renameConversation,
 } from "./sidebar.js";
@@ -60,7 +61,6 @@ import {
 } from "./conversation/stop.js";
 import {
   adoptDraftSkills,
-  preloadSkills,
   refreshSkillAutocomplete,
   setComposerCommandRunner,
 } from "./skills.js";
@@ -108,12 +108,18 @@ import {
   restoreComposerValue,
   snapshotComposerOwner,
   switchComposerOwner,
-  transferComposerOwner,
 } from "./composer/view-state.js";
 import { openAgentFinderRevive, openFoundAgent } from "./agent-finder/ui.js";
 import type { DraftCreator } from "./types.js";
 import { snapshotNewSubagentDefaults } from "./settings/draft-defaults/index.js";
 import { newAgentSettings } from "./sidebar/script.js";
+import {
+  newAgentDrafts,
+  retainDraft,
+  createdDraft,
+  finishDraft,
+  setDraftSendCancellation,
+} from "./new-agent-drafts/index.js";
 
 interface DraftSpec {
   parent: string | null;
@@ -167,6 +173,24 @@ function clearComposer(ownerId = currentUiOwnerId()): void {
 // Independent jobs own snapshotted targets/text, retries and visible failures.
 const statusEl = $<HTMLButtonElement>("#send-status")!;
 let jobs: SendJob[] = [];
+setDraftSendCancellation(
+  (draft) => {
+    if (!draft.creator) return;
+    const cancelled = jobs.filter(
+      (job) => job === draft.creator || job.waitFor === draft.creator,
+    );
+    for (const job of cancelled) clearTimeout(job.timer);
+    jobs = jobs.filter((job) => !cancelled.includes(job));
+    renderSendStatus();
+  },
+  (draft) =>
+    !!draft.creator &&
+    jobs.some(
+      (job) =>
+        (job === draft.creator || job.waitFor === draft.creator) &&
+        (job.inFlight || job.locked),
+    ),
+);
 let composerCommandStatusKey: string | null = null;
 const AUTH_RECOVERY_KEY = "recurse.authRecovery.v1";
 let pendingRecoveredAttachmentOwners: string[] = [];
@@ -181,7 +205,7 @@ export function preserveUnsentForLogin(): boolean {
   if (
     conversationUiState.hasUnpersistedComposerWork() ||
     composerHasVolatileWork() ||
-    [...state.drafts.values()].some((draft) => draft !== state.draft)
+    newAgentDrafts().some((draft) => draft !== state.draft)
   )
     return false;
   if (!hasUnsentComposerWork()) return true;
@@ -200,7 +224,7 @@ export function preserveUnsentForLogin(): boolean {
     draft: state.draft
       ? {
           parent: state.draft.parent,
-          backendLabel: state.draft.backendLabel,
+          backendLabel: state.draft.backendLabel || undefined,
           creatorIndex: state.draft.creator
             ? jobs.indexOf(state.draft.creator as SendJob)
             : -1,
@@ -222,7 +246,7 @@ export function preserveUnsentForLogin(): boolean {
       attachmentIds: job.attachmentIds,
       clientId: job.clientId,
       parent: job.parent,
-      backendLabel: job.backendLabel,
+      backendLabel: job.backendLabel || undefined,
       model: job.model,
       effort: job.effort,
       level: job.level,
@@ -316,7 +340,7 @@ function restoreAfterLogin(): void {
         .filter((job) => job === creator || job.waitFor === creator)
         .map((job) => ({ role: "user", content: job.content })),
     };
-    state.drafts.set(uiStateId, state.draft);
+    retainDraft(state.draft);
     state.selectedId = DRAFT;
     state.cursorId = DRAFT;
     switchComposerOwner(uiStateId);
@@ -389,7 +413,7 @@ export function hasUnsentComposerWork(): boolean {
     hasCommentSends() ||
     hasAnyStagedAttachments() ||
     jobs.length > 0 ||
-    state.drafts.size > 0 ||
+    newAgentDrafts().length > 0 ||
     conversationUiState.hasUnpersistedComposerWork() ||
     composerHasVolatileWork()
   );
@@ -404,6 +428,7 @@ function setSendStatus(msg: string, kind?: string): void {
 // Aggregate the jobs' states into the single status line: a failed batch (tap
 // to retry), else any in-progress reconnection, else nothing on the fast path.
 function renderSendStatus(): void {
+  renderSidebar();
   // Invariant: A real send owns the shared status surface from here; a late
   // response from an earlier command must not overwrite its retry/error state.
   composerCommandStatusKey = null;
@@ -1061,24 +1086,15 @@ function jobSucceeded(job: SendJob): void {
       job.sinceOffset ?? 0,
       job.messageId,
     );
-  // Invariant: Promote only the draft still on screen, preserving its thread.
-  // After navigation, the created agent appears through polling, never steals
-  // view.
-  if (
-    job.draft &&
-    job.convId &&
-    state.selectedId === DRAFT &&
-    state.draft &&
-    state.draft.creator === job
-  ) {
-    adoptDraftSkills(job.convId);
-    pinOperatorSend(job.convId);
-    selectAgent(job.convId, true, true);
-  } else if (job.draft && job.convId) {
-    for (const draft of state.drafts.values()) {
-      if (draft.creator !== job) continue;
-      transferComposerOwner(draft.uiStateId, job.convId);
-      state.drafts.delete(draft.uiStateId);
+  const draft = job.draft ? createdDraft(job) : undefined;
+  if (draft && job.convId) {
+    const foreground = state.draft === draft && state.selectedId === DRAFT;
+    adoptDraftSkills(job.convId, draft.parent);
+    finishDraft(draft, job.convId, foreground);
+    // Invariant: Background creation must not move the open conversation or its scroll.
+    if (foreground) {
+      pinOperatorSend(job.convId);
+      selectAgent(job.convId, true, true);
     }
   }
   state.openConvHash = "";
@@ -1176,12 +1192,6 @@ window.addEventListener("offline", () => renderSendStatus());
 function startDraft(spec: DraftSpec): void {
   if (sharedTrees !== null && (!spec.parent || !state.nodes[spec.parent]))
     return;
-  if (state.drafts.size >= 20) {
-    alert(
-      "You have 20 open drafts. Send or discard a draft before opening another.",
-    );
-    return;
-  }
   openDraft({
     ...snapshotNewSubagentDefaults(),
     ...spec,
@@ -1214,7 +1224,12 @@ sendEl.onclick = (event: MouseEvent) => {
     void requestStop(event.detail === 0 ? "keyboard" : "click");
 };
 
+let draftPreviewTimer: ReturnType<typeof setTimeout> | undefined;
 inputEl.addEventListener("input", () => {
+  if (state.draft) {
+    clearTimeout(draftPreviewTimer);
+    draftPreviewTimer = setTimeout(renderSidebar, 150);
+  }
   // Invariant: Any edit cancels a pending Stop confirmation. Clearing the text
   // after typing can return the control to Stop, but never to an already-hot
   // Stop.

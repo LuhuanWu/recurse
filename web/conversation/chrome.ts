@@ -640,8 +640,7 @@ export function renderDraft(): void {
   state.selectedRunning = false;
   paintComposerRunState(null);
   resetThreadView();
-  const d = draft || { parent: null };
-  const pending = d.pending || [];
+  const pending = draft?.pending || [];
   inputEl.disabled = false;
   inputEl.placeholder = pending.length
     ? "Message this agent…"

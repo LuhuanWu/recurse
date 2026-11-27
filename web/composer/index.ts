@@ -1,3 +1,5 @@
+// Composer controls and owner-state operations shared by feature modules.
+export { discardComposerOwner, transferComposerOwner } from "./view-state.js";
 export {
   activeComposerOwnerId,
   autosize,

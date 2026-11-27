@@ -48,7 +48,8 @@ export function promoteComposerOwner(ownerId: string): void {
 }
 
 export function transferComposerOwner(from: string, to: string): void {
-  controller.transfer(from, to);
+  controller.transfer(from, to, true);
+  if (to === controller.owner()) announceRestore(to);
 }
 
 export function discardComposerOwner(ownerId: string): void {

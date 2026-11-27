@@ -375,11 +375,13 @@ export function preloadSkills(force = false): void {
 // Preserve the draft's already-visible registry across the instant ownership
 // transition to its newly-created agent. The next tree poll supplies the same
 // workdir context authoritatively and starts that agent's own revalidation.
-export function adoptDraftSkills(agentId: string): void {
-  const source = skillSource();
-  if (!source) return;
-  contextOverrides.set(agentId, source.context);
-  skillLoader.adopt(agentId, source.context);
+export function adoptDraftSkills(agentId: string, parent: string | null): void {
+  const context =
+    parent &&
+    (state.nodes[parent]?.skill_context || contextOverrides.get(parent));
+  if (!context) return;
+  contextOverrides.set(agentId, context);
+  skillLoader.adopt(agentId, context);
 }
 
 export function clearSkillsCache(): void {

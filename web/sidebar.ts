@@ -63,12 +63,18 @@ import {
 import { requestUiStatus } from "./ui-events.js";
 import { preloadSkills } from "./skills.js";
 import {
-  discardComposerOwner,
   promoteComposerOwner,
   snapshotComposerOwner,
   switchComposerOwner,
 } from "./composer/view-state.js";
 import { conversationUiState } from "./conversation-ui-state/store.js";
+import { pendingSavedRecovery } from "./composer/index.js";
+import {
+  newAgentDrafts,
+  retainDraft,
+  discardDraft,
+  draftRow,
+} from "./new-agent-drafts/index.js";
 import { TitleActionOrder } from "./title-actions.js";
 import {
   ancestorIds,
@@ -189,7 +195,7 @@ function stableOrder(list: TreeNode[]): TreeNode[] {
 }
 
 // Parent edges drive indentation and collapse, but roots are still peers in
-// one stable activity order. A draft sits after the selected row when possible.
+// one stable activity order. Retained drafts stay above scripted sections.
 function visibleTree(): TreeEntry[] {
   const out: TreeEntry[] =
     sharedTrees === null
@@ -211,7 +217,7 @@ function visibleTree(): TreeEntry[] {
         }));
   // Invariant: Once the draft's agent is listed, the draft row takes its place
   // until promotion, so the agent shows once and keeps its place throughout.
-  for (const draft of state.drafts.values()) {
+  for (const draft of newAgentDrafts()) {
     const created = draft.creator?.convId;
     const listed = created ? out.findIndex((e) => e.n?.id === created) : -1;
     if (listed >= 0) {
@@ -376,48 +382,15 @@ function rowT(
   );
   if (e.draftRow) {
     const draft = e.draftRow;
-    const title =
-      conversationUiState.composer(draft.uiStateId).text.trim().slice(0, 80) ||
-      "New agent";
-    return html`<div
-      class=${`agent draft-row${state.draft === draft ? " cursor selected" : ""}`}
-      data-theme="sidebar-row"
-      style=${pad}
-      role="treeitem"
-      aria-label="New agent draft"
-    >
-      <button
-        class="btn quiet draft-open"
-        aria-label=${`Resume draft: ${title}`}
-        aria-current=${state.draft === draft ? "page" : nothing}
-        @click=${() => openDraft(draft)}
-      >
-        <span class="agent-state draft" aria-hidden="true"
-          ><span class="state-mark"></span
-        ></span>
-        <span class="title">Draft: ${title}</span>
-      </button>
-      <button
-        class="btn quiet sm"
-        aria-label=${`Discard draft: ${title}`}
-        ?disabled=${!!draft.creator}
-        @click=${() => {
-          if (
-            !confirm(
-              "Discard this draft?\n\nIts unsent text, settings and attachments will be lost.",
-            )
-          )
-            return;
-          if (state.draft === draft)
-            selectAgent(draft.parent || Object.keys(state.nodes)[0] || "");
-          state.drafts.delete(draft.uiStateId);
-          discardComposerOwner(draft.uiStateId);
-          renderSidebar();
-        }}
-      >
-        Discard
-      </button>
-    </div>`;
+    return draftRow(draft, {
+      selected: state.draft === draft,
+      parentTitle: draft.parent ? state.nodes[draft.parent]?.title : undefined,
+      open: () => openDraft(draft),
+      discard: () => {
+        discardDraft(draft, selectAgent);
+        renderSidebar();
+      },
+    });
   }
   const n = e.n!;
   const takenOver = isTakenOver(n);
@@ -649,10 +622,13 @@ window.addEventListener(SIDEBAR_CHANGE, () => renderSidebar());
 setInterval(() => renderSidebar(), 60_000);
 
 export function openDraft(draft: Draft): void {
-  if (!guardLeaveComments()) return;
+  if (pendingSavedRecovery) {
+    alert("Wait for your recovered message to load before opening a draft.");
+    return;
+  }
+  if (!guardLeaveComments() || !retainDraft(draft)) return;
   snapshotComposerOwner(currentUiOwnerId());
   window.dispatchEvent(new Event("recurse:selection-change"));
-  state.drafts.set(draft.uiStateId, draft);
   state.draft = draft;
   state.selectedId = DRAFT;
   state.cursorId = DRAFT;
@@ -683,14 +659,15 @@ export function selectAgent(
   // before any selectedId/draft mutation so even a cold async navigation cannot
   // retarget it.
   if (!skipComposerSnapshot) snapshotComposerOwner(outgoingUiOwner);
-  // Invariant: Only promotion consumes a draft; navigation retains its owner.
-  if (state.draft && preserveAttachments)
-    state.drafts.delete(state.draft.uiStateId);
+  const promoteDraft =
+    preserveAttachments &&
+    !skipComposerSnapshot &&
+    state.draft?.creator?.convId === id;
   state.draft = null;
   noteSelection(id);
   state.selectedId = id;
   state.cursorId = id;
-  if (outgoing === DRAFT && preserveAttachments) promoteComposerOwner(id);
+  if (promoteDraft) promoteComposerOwner(id);
   else switchComposerOwner(id);
   if (state.nodes[id]) announceNode(state.nodes[id], "Opened conversation");
   selectedRowReveal = requestSelectedRowReveal(id);
@@ -721,11 +698,12 @@ export function selectAgent(
   // Invariant: Warm cached threads stay interactive while reconciling. Cold
   // switches stand down old chrome; owner-preserving draft promotion is already
   // this conversation and must never dim or become inert.
-  if (id !== DRAFT) showSelectedConversation(id, preserveAttachments);
+  if (!id) renderEmptyAgentList();
+  else if (id !== DRAFT) showSelectedConversation(id, preserveAttachments);
   preloadSkills();
   // Dispatch the focused read before mounting saved panes. Its hold keeps
   // closed-pane probes from taking a connection ahead of the focused read.
-  if (refetch) refreshConv();
+  if (refetch && id) refreshConv();
   syncPanes();
   renderSidebar();
   if (treeFocused) focusAgentTree();
@@ -759,7 +737,7 @@ function currentHistoryView(): HistoryView {
   return { agent: state.selectedId, draft: false };
 }
 
-export function syncHistoryToSelection(): void {
+function syncHistoryToSelection(): void {
   const correction = correctingHistory;
   if (!deferImageVisitSelectionHistory(() => writeSelectionHistory(correction)))
     writeSelectionHistory(correction);

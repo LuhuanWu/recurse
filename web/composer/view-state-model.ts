@@ -95,11 +95,29 @@ export class ComposerViewStateController {
     return this.restore(ownerId);
   }
 
-  transfer(from: string, to: string): void {
-    const volatile = this.volatile.get(from);
-    this.store.transfer(from, to);
+  transfer(from: string, to: string, preserveTarget = false): void {
+    if (from === to) return;
+    if (preserveTarget && to === this.ownerId) this.snapshot(to);
+    const source = this.volatile.get(from) || this.store.composer(from);
+    const target = preserveTarget
+      ? this.volatile.get(to) || this.store.composer(to)
+      : null;
+    this.store.transfer(from, to, preserveTarget);
     this.volatile.delete(from);
-    if (volatile) this.volatile.set(to, volatile);
+    const prefix =
+      target?.text && target.text !== source.text && source.text
+        ? `${source.text}\n`
+        : "";
+    this.put(
+      to,
+      target?.text
+        ? {
+            text: prefix + target.text,
+            selectionStart: prefix.length + target.selectionStart,
+            selectionEnd: prefix.length + target.selectionEnd,
+          }
+        : source,
+    );
   }
 
   discard(ownerId: string): void {

@@ -27,7 +27,6 @@ interface AppState {
   // Side conversations (tree rows with side_of), kept out of nodes.
   sides: TreeNode[];
   draft: Draft | null;
-  drafts: Map<string, Draft>;
   selectedId: string;
   cursorId: string;
   openConvHash: string;
@@ -46,7 +45,6 @@ export const state: AppState = {
   nodes: {},
   sides: [],
   draft: null,
-  drafts: new Map(),
   selectedId: "",
   cursorId: "",
   openConvHash: "",
