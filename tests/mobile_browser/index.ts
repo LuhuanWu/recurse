@@ -37,6 +37,7 @@ import { tests as composer } from "./test_composer";
 import { tests as composerEffort } from "./test_composer_effort";
 import { tests as safety } from "./test_safety";
 import { tests as newAgentFocus } from "./test_new_agent_focus";
+import { tests as newAgentDrafts } from "./test_new_agent_drafts";
 import { tests as agentNavigation } from "./test_agent_navigation";
 import { tests as conversationTitle } from "./test_conversation_title";
 import { tests as firstLoad } from "./test_first_load";
@@ -113,6 +114,7 @@ export const groups: Array<[string, BrowserTest[]]> = [
   ["settings-subpages", settingsSubpages],
   ["mcp-settings", mcpSettings],
   ["composer", [...composer, ...composerEffort]],
+  ["new-agent-drafts", newAgentDrafts],
   ["safety", safety],
   ["new-agent-focus", [...newAgentFocus, ...agentNavigation]],
   ["conversation-title", conversationTitle],

@@ -41,7 +41,7 @@ import {
   refreshConv,
   showSelectedConversation,
 } from "./conversation/fetch.js";
-import { renderEmptyAgentList } from "./conversation/chrome.js";
+import { renderDraft, renderEmptyAgentList } from "./conversation/chrome.js";
 import { beginShowingConversation } from "./show-timing.js";
 import { beginPaneVisit, syncPanes } from "./panes.js";
 import { openArtifactLink } from "./artifacts/pane.js";
@@ -63,6 +63,7 @@ import {
 import { requestUiStatus } from "./ui-events.js";
 import { preloadSkills } from "./skills.js";
 import {
+  discardComposerOwner,
   promoteComposerOwner,
   snapshotComposerOwner,
   switchComposerOwner,
@@ -87,7 +88,7 @@ import {
   type TreeRelationship,
 } from "./tree_projection.js";
 import { canDrop } from "./reparent.js";
-import type { TreeNode } from "./types.js";
+import type { Draft, TreeNode } from "./types.js";
 import type { Action, Section } from "../src/sidebar_script/index.js";
 import {
   SIDEBAR_CHANGE,
@@ -116,7 +117,7 @@ import {
 
 interface TreeEntry {
   n?: TreeNode;
-  draftRow?: boolean;
+  draftRow?: Draft;
   /** A backend section's header row. */
   header?: Section;
   /** A top-level row's actions. */
@@ -210,18 +211,13 @@ function visibleTree(): TreeEntry[] {
         }));
   // Invariant: Once the draft's agent is listed, the draft row takes its place
   // until promotion, so the agent shows once and keeps its place throughout.
-  const created = state.draft?.creator?.convId;
-  const listed = created ? out.findIndex((e) => e.n?.id === created) : -1;
-  if (listed >= 0) {
-    const { depth, sectionDepth } = out[listed];
-    out[listed] = { draftRow: true, depth, sectionDepth };
-  } else if (state.draft) {
-    const current = out.findIndex((e) => e.n?.id === state.selectedId);
-    out.splice(current >= 0 ? current + 1 : 0, 0, {
-      draftRow: true,
-      depth: current >= 0 ? out[current].depth + 1 : 0,
-      sectionDepth: current >= 0 ? out[current].sectionDepth : 0,
-    });
+  for (const draft of state.drafts.values()) {
+    const created = draft.creator?.convId;
+    const listed = created ? out.findIndex((e) => e.n?.id === created) : -1;
+    if (listed >= 0) {
+      const { depth, sectionDepth } = out[listed];
+      out[listed] = { draftRow: draft, depth, sectionDepth };
+    } else out.unshift({ draftRow: draft, depth: 0 });
   }
   return out;
 }
@@ -355,12 +351,12 @@ function announce(text: string): void {
   treeAnnouncer.textContent = text;
 }
 
-// Agent ids key real rows; one fixed sentinel keys the draft row.
+// Each retained draft has its own stable row identity.
 const rowKey = (e: TreeEntry): string =>
   e.header
     ? `section:${sectionKey(e.header)}`
     : e.draftRow
-      ? "__draft__"
+      ? e.draftRow.uiStateId
       : e.n!.id;
 
 // One row: the not-yet-created draft placeholder, or a real agent node.
@@ -379,27 +375,48 @@ function rowT(
       : {},
   );
   if (e.draftRow) {
+    const draft = e.draftRow;
+    const title =
+      conversationUiState.composer(draft.uiStateId).text.trim().slice(0, 80) ||
+      "New agent";
     return html`<div
-      class="agent cursor draft-row"
+      class=${`agent draft-row${state.draft === draft ? " cursor selected" : ""}`}
       data-theme="sidebar-row"
       style=${pad}
       role="treeitem"
       aria-label="New agent draft"
-      @click=${() => {
-        syncHistoryToSelection();
-        inputEl.focus();
-      }}
     >
-      <div class="row1">
-        <span
-          class="agent-state draft"
-          role="img"
-          aria-label="Draft agent"
-          title="Draft agent"
-          ><span class="state-mark" aria-hidden="true"></span
+      <button
+        class="btn quiet draft-open"
+        aria-label=${`Resume draft: ${title}`}
+        aria-current=${state.draft === draft ? "page" : nothing}
+        @click=${() => openDraft(draft)}
+      >
+        <span class="agent-state draft" aria-hidden="true"
+          ><span class="state-mark"></span
         ></span>
-        <span class="title">New agent</span>
-      </div>
+        <span class="title">Draft: ${title}</span>
+      </button>
+      <button
+        class="btn quiet sm"
+        aria-label=${`Discard draft: ${title}`}
+        ?disabled=${!!draft.creator}
+        @click=${() => {
+          if (
+            !confirm(
+              "Discard this draft?\n\nIts unsent text, settings and attachments will be lost.",
+            )
+          )
+            return;
+          if (state.draft === draft)
+            selectAgent(draft.parent || Object.keys(state.nodes)[0] || "");
+          state.drafts.delete(draft.uiStateId);
+          discardComposerOwner(draft.uiStateId);
+          renderSidebar();
+        }}
+      >
+        Discard
+      </button>
     </div>`;
   }
   const n = e.n!;
@@ -564,7 +581,7 @@ export function renderSidebar(): void {
         const sectionRows = repeat(
           entries.filter((e) =>
             e.draftRow
-              ? (state.draft?.backendLabel ?? "") === label
+              ? (e.draftRow.backendLabel ?? "") === label
               : e.header
                 ? e.header.backend === label
                 : parseConversationId(e.n!.id).label === label,
@@ -631,6 +648,25 @@ window.addEventListener("recurse:stop-pending", () => renderSidebar());
 window.addEventListener(SIDEBAR_CHANGE, () => renderSidebar());
 setInterval(() => renderSidebar(), 60_000);
 
+export function openDraft(draft: Draft): void {
+  if (!guardLeaveComments()) return;
+  snapshotComposerOwner(currentUiOwnerId());
+  window.dispatchEvent(new Event("recurse:selection-change"));
+  state.drafts.set(draft.uiStateId, draft);
+  state.draft = draft;
+  state.selectedId = DRAFT;
+  state.cursorId = DRAFT;
+  state.openConvHash = "";
+  abandonBackgroundWarming();
+  switchComposerOwner(draft.uiStateId);
+  preloadSkills();
+  renderDraft();
+  renderSidebar();
+  syncHistoryToSelection();
+  refreshUpBtn();
+  inputEl.focus();
+}
+
 export function selectAgent(
   id: string,
   refetch = true,
@@ -647,16 +683,15 @@ export function selectAgent(
   // before any selectedId/draft mutation so even a cold async navigation cannot
   // retarget it.
   if (!skipComposerSnapshot) snapshotComposerOwner(outgoingUiOwner);
-  // Invariant: Staged files switch through the same owner lifecycle as text.
-  // Saved owners stay cached; an unreachable draft is disposed by dropPrevious
-  // below, while draft promotion transfers both views to the newly created
-  // conversation.
+  // Invariant: Only promotion consumes a draft; navigation retains its owner.
+  if (state.draft && preserveAttachments)
+    state.drafts.delete(state.draft.uiStateId);
   state.draft = null;
   noteSelection(id);
   state.selectedId = id;
   state.cursorId = id;
   if (outgoing === DRAFT && preserveAttachments) promoteComposerOwner(id);
-  else switchComposerOwner(id, outgoing === DRAFT);
+  else switchComposerOwner(id);
   if (state.nodes[id]) announceNode(state.nodes[id], "Opened conversation");
   selectedRowReveal = requestSelectedRowReveal(id);
   state.openConvHash = "";

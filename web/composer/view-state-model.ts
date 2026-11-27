@@ -89,14 +89,22 @@ export class ComposerViewStateController {
 
   promoteTo(ownerId: string): ComposerViewState {
     if (ownerId === this.ownerId) return this.store.composer(ownerId);
-    const previous = this.ownerId;
-    this.snapshot(previous);
-    const volatile = this.volatile.get(previous);
-    this.store.transfer(previous, ownerId);
-    this.volatile.delete(previous);
-    if (volatile) this.volatile.set(ownerId, volatile);
+    this.snapshot(this.ownerId);
+    this.transfer(this.ownerId, ownerId);
     this.ownerId = ownerId;
     return this.restore(ownerId);
+  }
+
+  transfer(from: string, to: string): void {
+    const volatile = this.volatile.get(from);
+    this.store.transfer(from, to);
+    this.volatile.delete(from);
+    if (volatile) this.volatile.set(to, volatile);
+  }
+
+  discard(ownerId: string): void {
+    this.volatile.delete(ownerId);
+    this.store.remove(ownerId);
   }
 
   clear(ownerId: string): boolean {

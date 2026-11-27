@@ -531,8 +531,8 @@ export interface Draft {
   parent: string | null;
   tags?: string[];
   backendLabel?: string;
-  // ephemeral browser-only owner for this one live draft
-  uiStateId?: string;
+  // Browser-only identity retained until this draft is sent or discarded.
+  uiStateId: string;
   model?: string | null;
   effort?: string;
   // Effort level applied at create time.

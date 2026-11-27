@@ -102,7 +102,7 @@ export class ConversationUiStateStore implements UiStateStoreState {
     this.sessionRecords.set(ownerId, value);
     for (const id of this.sessionRecords.keys()) {
       if (this.sessionRecords.size <= MAX_RETAINED_OWNERS) break;
-      if (id !== ownerId && !this.dirtySession.has(id)) {
+      if (id !== ownerId && !ephemeralOwner(id) && !this.dirtySession.has(id)) {
         this.sessionRecords.delete(id);
         this.sessionPaneFields.delete(id);
         this.releaseOwnerResources(id);

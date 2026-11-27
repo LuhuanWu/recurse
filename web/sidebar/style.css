@@ -64,6 +64,9 @@
   #agent-list .agent .agent-state { width: 12px; min-width: 12px; height: 12px; }
   #agent-list .agent .kids { padding-block: 0; }
 }
+#agent-list .draft-row { display: flex; flex-direction: row; align-items: center; gap: var(--space-3); }
+.draft-open { flex: 1; min-width: 0; justify-content: flex-start; text-align: start; gap: var(--space-3); }
+.draft-open .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Re-parent drag: the source is dashed, legal destinations are outlined, and
    an invalid drop target is flagged red. */
 .agent.drag-source { opacity: .6; border-style: dashed;

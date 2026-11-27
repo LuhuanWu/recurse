@@ -30,17 +30,14 @@ import {
   autosize,
   consumeComposerStopHold,
   disarmComposerStop,
-  focusComposerAtEnd,
   pendingSavedRecovery,
   setPendingSavedRecovery,
 } from "./composer/index.js";
 
 import {
   selectAgent,
-  renderSidebar,
-  syncHistoryToSelection,
+  openDraft,
   asHistoryCorrection,
-  refreshUpBtn,
   renameConversation,
 } from "./sidebar.js";
 import { renderDraft, renderColdOutbox } from "./conversation/chrome.js";
@@ -61,7 +58,6 @@ import {
   prepareStopTarget,
   requestStop,
 } from "./conversation/stop.js";
-import { guardLeaveComments } from "./comments.js";
 import {
   adoptDraftSkills,
   preloadSkills,
@@ -112,6 +108,7 @@ import {
   restoreComposerValue,
   snapshotComposerOwner,
   switchComposerOwner,
+  transferComposerOwner,
 } from "./composer/view-state.js";
 import { openAgentFinderRevive, openFoundAgent } from "./agent-finder/ui.js";
 import type { DraftCreator } from "./types.js";
@@ -183,7 +180,8 @@ export function preserveUnsentForLogin(): boolean {
   // over-bound legacy/programmatic value exists only in this tab.
   if (
     conversationUiState.hasUnpersistedComposerWork() ||
-    composerHasVolatileWork()
+    composerHasVolatileWork() ||
+    [...state.drafts.values()].some((draft) => draft !== state.draft)
   )
     return false;
   if (!hasUnsentComposerWork()) return true;
@@ -318,6 +316,7 @@ function restoreAfterLogin(): void {
         .filter((job) => job === creator || job.waitFor === creator)
         .map((job) => ({ role: "user", content: job.content })),
     };
+    state.drafts.set(uiStateId, state.draft);
     state.selectedId = DRAFT;
     state.cursorId = DRAFT;
     switchComposerOwner(uiStateId);
@@ -390,7 +389,7 @@ export function hasUnsentComposerWork(): boolean {
     hasCommentSends() ||
     hasAnyStagedAttachments() ||
     jobs.length > 0 ||
-    !!state.draft ||
+    state.drafts.size > 0 ||
     conversationUiState.hasUnpersistedComposerWork() ||
     composerHasVolatileWork()
   );
@@ -1075,6 +1074,12 @@ function jobSucceeded(job: SendJob): void {
     adoptDraftSkills(job.convId);
     pinOperatorSend(job.convId);
     selectAgent(job.convId, true, true);
+  } else if (job.draft && job.convId) {
+    for (const draft of state.drafts.values()) {
+      if (draft.creator !== job) continue;
+      transferComposerOwner(draft.uiStateId, job.convId);
+      state.drafts.delete(draft.uiStateId);
+    }
   }
   state.openConvHash = "";
   poll();
@@ -1171,36 +1176,17 @@ window.addEventListener("offline", () => renderSendStatus());
 function startDraft(spec: DraftSpec): void {
   if (sharedTrees !== null && (!spec.parent || !state.nodes[spec.parent]))
     return;
-  // Invariant: A draft has no panes of its own. Guard before changing selection
-  // so staged Artifacts/Changes comments stay visible when the operator
-  // cancels.
-  if (!guardLeaveComments()) return;
-  const outgoingOwner = currentUiOwnerId();
-  snapshotComposerOwner(outgoingOwner);
-  const outgoing = state.selectedId;
-  if (outgoing !== DRAFT)
-    window.dispatchEvent(new Event("recurse:selection-change"));
-  const uiStateId = newDraftUiOwnerId();
-  state.draft = {
+  if (state.drafts.size >= 20) {
+    alert(
+      "You have 20 open drafts. Send or discard a draft before opening another.",
+    );
+    return;
+  }
+  openDraft({
     ...snapshotNewSubagentDefaults(),
     ...spec,
-    uiStateId,
-  };
-  state.selectedId = DRAFT;
-  state.cursorId = DRAFT;
-  state.openConvHash = "";
-  preloadSkills();
-  // Invariant: A new draft never inherits a saved agent or replaced draft's
-  // text. The latter is unreachable after replacement, so drop its ephemeral
-  // record.
-  switchComposerOwner(uiStateId, outgoing === DRAFT);
-  renderDraft();
-  renderSidebar();
-  // Invariant: A draft is its own history entry, addressed by the parent it
-  // will be created under, so Back closes it and lands on that parent.
-  syncHistoryToSelection();
-  refreshUpBtn();
-  focusComposerAtEnd();
+    uiStateId: newDraftUiOwnerId(),
+  });
 }
 /** Open a top-level draft immediately, with optional preselected tags. */
 export function startNewAgent(backendLabel = "", tags?: string[]): void {
