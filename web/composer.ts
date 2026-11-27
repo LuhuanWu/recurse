@@ -30,17 +30,15 @@ import {
   autosize,
   consumeComposerStopHold,
   disarmComposerStop,
-  focusComposerAtEnd,
   pendingSavedRecovery,
   setPendingSavedRecovery,
 } from "./composer/index.js";
 
 import {
   selectAgent,
+  openDraft,
   renderSidebar,
-  syncHistoryToSelection,
   asHistoryCorrection,
-  refreshUpBtn,
   renameConversation,
 } from "./sidebar.js";
 import { renderDraft, renderColdOutbox } from "./conversation/chrome.js";
@@ -61,10 +59,8 @@ import {
   prepareStopTarget,
   requestStop,
 } from "./conversation/stop.js";
-import { guardLeaveComments } from "./comments.js";
 import {
   adoptDraftSkills,
-  preloadSkills,
   refreshSkillAutocomplete,
   setComposerCommandRunner,
 } from "./skills.js";
@@ -117,6 +113,13 @@ import { openAgentFinderRevive, openFoundAgent } from "./agent-finder/ui.js";
 import type { DraftCreator } from "./types.js";
 import { snapshotNewSubagentDefaults } from "./settings/draft-defaults/index.js";
 import { newAgentSettings } from "./sidebar/script.js";
+import {
+  newAgentDrafts,
+  retainDraft,
+  createdDraft,
+  finishDraft,
+  setDraftSendCancellation,
+} from "./new-agent-drafts/index.js";
 
 interface DraftSpec {
   parent: string | null;
@@ -170,6 +173,26 @@ function clearComposer(ownerId = currentUiOwnerId()): void {
 // Independent jobs own snapshotted targets/text, retries and visible failures.
 const statusEl = $<HTMLButtonElement>("#send-status")!;
 let jobs: SendJob[] = [];
+setDraftSendCancellation(
+  (draft) => {
+    if (!draft.creator) return;
+    // Draft creators/followers are memory-only. Independent saved-agent sends
+    // may share their destination, but own their outbox entries and are not ours.
+    const cancelled = jobs.filter(
+      (job) => job === draft.creator || job.waitFor === draft.creator,
+    );
+    for (const job of cancelled) clearTimeout(job.timer);
+    jobs = jobs.filter((job) => !cancelled.includes(job));
+    renderSendStatus();
+  },
+  (draft) =>
+    !!draft.creator &&
+    jobs.some(
+      (job) =>
+        (job === draft.creator || job.waitFor === draft.creator) &&
+        (job.inFlight || job.locked),
+    ),
+);
 let composerCommandStatusKey: string | null = null;
 const AUTH_RECOVERY_KEY = "recurse.authRecovery.v1";
 let pendingRecoveredAttachmentOwners: string[] = [];
@@ -183,7 +206,8 @@ export function preserveUnsentForLogin(): boolean {
   // over-bound legacy/programmatic value exists only in this tab.
   if (
     conversationUiState.hasUnpersistedComposerWork() ||
-    composerHasVolatileWork()
+    composerHasVolatileWork() ||
+    newAgentDrafts().some((draft) => draft !== state.draft)
   )
     return false;
   if (!hasUnsentComposerWork()) return true;
@@ -202,7 +226,7 @@ export function preserveUnsentForLogin(): boolean {
     draft: state.draft
       ? {
           parent: state.draft.parent,
-          backendLabel: state.draft.backendLabel,
+          backendLabel: state.draft.backendLabel || undefined,
           creatorIndex: state.draft.creator
             ? jobs.indexOf(state.draft.creator as SendJob)
             : -1,
@@ -224,7 +248,7 @@ export function preserveUnsentForLogin(): boolean {
       attachmentIds: job.attachmentIds,
       clientId: job.clientId,
       parent: job.parent,
-      backendLabel: job.backendLabel,
+      backendLabel: job.backendLabel || undefined,
       model: job.model,
       effort: job.effort,
       level: job.level,
@@ -318,6 +342,7 @@ function restoreAfterLogin(): void {
         .filter((job) => job === creator || job.waitFor === creator)
         .map((job) => ({ role: "user", content: job.content })),
     };
+    retainDraft(state.draft);
     state.selectedId = DRAFT;
     state.cursorId = DRAFT;
     switchComposerOwner(uiStateId);
@@ -390,7 +415,7 @@ export function hasUnsentComposerWork(): boolean {
     hasCommentSends() ||
     hasAnyStagedAttachments() ||
     jobs.length > 0 ||
-    !!state.draft ||
+    newAgentDrafts().length > 0 ||
     conversationUiState.hasUnpersistedComposerWork() ||
     composerHasVolatileWork()
   );
@@ -405,6 +430,7 @@ function setSendStatus(msg: string, kind?: string): void {
 // Aggregate the jobs' states into the single status line: a failed batch (tap
 // to retry), else any in-progress reconnection, else nothing on the fast path.
 function renderSendStatus(): void {
+  if (newAgentDrafts().length) renderSidebar();
   // Invariant: A real send owns the shared status surface from here; a late
   // response from an earlier command must not overwrite its retry/error state.
   composerCommandStatusKey = null;
@@ -1062,19 +1088,16 @@ function jobSucceeded(job: SendJob): void {
       job.sinceOffset ?? 0,
       job.messageId,
     );
-  // Invariant: Promote only the draft still on screen, preserving its thread.
-  // After navigation, the created agent appears through polling, never steals
-  // view.
-  if (
-    job.draft &&
-    job.convId &&
-    state.selectedId === DRAFT &&
-    state.draft &&
-    state.draft.creator === job
-  ) {
-    adoptDraftSkills(job.convId);
-    pinOperatorSend(job.convId);
-    selectAgent(job.convId, true, true);
+  const draft = job.draft ? createdDraft(job) : undefined;
+  if (draft && job.convId) {
+    const foreground = state.draft === draft && state.selectedId === DRAFT;
+    adoptDraftSkills(job.convId, draft.parent);
+    finishDraft(draft, job.convId, foreground);
+    // Invariant: Background creation must not move the open conversation or its scroll.
+    if (foreground) {
+      pinOperatorSend(job.convId);
+      selectAgent(job.convId, true, true);
+    }
   }
   state.openConvHash = "";
   poll();
@@ -1171,36 +1194,11 @@ window.addEventListener("offline", () => renderSendStatus());
 function startDraft(spec: DraftSpec): void {
   if (sharedTrees !== null && (!spec.parent || !state.nodes[spec.parent]))
     return;
-  // Invariant: A draft has no panes of its own. Guard before changing selection
-  // so staged Artifacts/Changes comments stay visible when the operator
-  // cancels.
-  if (!guardLeaveComments()) return;
-  const outgoingOwner = currentUiOwnerId();
-  snapshotComposerOwner(outgoingOwner);
-  const outgoing = state.selectedId;
-  if (outgoing !== DRAFT)
-    window.dispatchEvent(new Event("recurse:selection-change"));
-  const uiStateId = newDraftUiOwnerId();
-  state.draft = {
+  openDraft({
     ...snapshotNewSubagentDefaults(),
     ...spec,
-    uiStateId,
-  };
-  state.selectedId = DRAFT;
-  state.cursorId = DRAFT;
-  state.openConvHash = "";
-  preloadSkills();
-  // Invariant: A new draft never inherits a saved agent or replaced draft's
-  // text. The latter is unreachable after replacement, so drop its ephemeral
-  // record.
-  switchComposerOwner(uiStateId, outgoing === DRAFT);
-  renderDraft();
-  renderSidebar();
-  // Invariant: A draft is its own history entry, addressed by the parent it
-  // will be created under, so Back closes it and lands on that parent.
-  syncHistoryToSelection();
-  refreshUpBtn();
-  focusComposerAtEnd();
+    uiStateId: newDraftUiOwnerId(),
+  });
 }
 /** Open a top-level draft immediately, with optional preselected tags. */
 export function startNewAgent(backendLabel = "", tags?: string[]): void {
@@ -1228,7 +1226,12 @@ sendEl.onclick = (event: MouseEvent) => {
     void requestStop(event.detail === 0 ? "keyboard" : "click");
 };
 
+let draftPreviewTimer: ReturnType<typeof setTimeout> | undefined;
 inputEl.addEventListener("input", () => {
+  if (state.draft) {
+    clearTimeout(draftPreviewTimer);
+    draftPreviewTimer = setTimeout(renderSidebar, 150);
+  }
   // Invariant: Any edit cancels a pending Stop confirmation. Clearing the text
   // after typing can return the control to Stop, but never to an already-hot
   // Stop.

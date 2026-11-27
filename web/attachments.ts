@@ -317,7 +317,11 @@ export function transferStagedAttachmentOwner(
 ): void {
   if (fromOwnerId === toOwnerId) return;
   const ownerState = attachmentStates.take(fromOwnerId);
-  if (ownerState) attachmentStates.set(toOwnerId, ownerState);
+  if (ownerState) {
+    const target = attachmentStates.take(toOwnerId);
+    if (target) ownerState.entries.push(...target.entries);
+    attachmentStates.set(toOwnerId, ownerState);
+  }
   rerenderOwner(activeOwnerId);
 }
 

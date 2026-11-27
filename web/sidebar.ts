@@ -41,7 +41,7 @@ import {
   refreshConv,
   showSelectedConversation,
 } from "./conversation/fetch.js";
-import { renderEmptyAgentList } from "./conversation/chrome.js";
+import { renderDraft, renderEmptyAgentList } from "./conversation/chrome.js";
 import { beginShowingConversation } from "./show-timing.js";
 import { beginPaneVisit, syncPanes } from "./panes.js";
 import { openArtifactLink } from "./artifacts/pane.js";
@@ -68,6 +68,14 @@ import {
   switchComposerOwner,
 } from "./composer/view-state.js";
 import { conversationUiState } from "./conversation-ui-state/store.js";
+import { pendingSavedRecovery } from "./composer/index.js";
+import {
+  newAgentDrafts,
+  retainDraft,
+  releaseEmptyDraft,
+  discardDraft,
+  draftRow,
+} from "./new-agent-drafts/index.js";
 import { TitleActionOrder } from "./title-actions.js";
 import {
   ancestorIds,
@@ -87,7 +95,7 @@ import {
   type TreeRelationship,
 } from "./tree_projection.js";
 import { canDrop } from "./reparent.js";
-import type { TreeNode } from "./types.js";
+import type { Draft, TreeNode } from "./types.js";
 import type { Action, Section } from "../src/sidebar_script/index.js";
 import {
   SIDEBAR_CHANGE,
@@ -116,7 +124,7 @@ import {
 
 interface TreeEntry {
   n?: TreeNode;
-  draftRow?: boolean;
+  draftRow?: Draft;
   /** A backend section's header row. */
   header?: Section;
   /** A top-level row's actions. */
@@ -188,7 +196,7 @@ function stableOrder(list: TreeNode[]): TreeNode[] {
 }
 
 // Parent edges drive indentation and collapse, but roots are still peers in
-// one stable activity order. A draft sits after the selected row when possible.
+// one stable activity order. Retained drafts stay above scripted sections.
 function visibleTree(): TreeEntry[] {
   const out: TreeEntry[] =
     sharedTrees === null
@@ -210,18 +218,13 @@ function visibleTree(): TreeEntry[] {
         }));
   // Invariant: Once the draft's agent is listed, the draft row takes its place
   // until promotion, so the agent shows once and keeps its place throughout.
-  const created = state.draft?.creator?.convId;
-  const listed = created ? out.findIndex((e) => e.n?.id === created) : -1;
-  if (listed >= 0) {
-    const { depth, sectionDepth } = out[listed];
-    out[listed] = { draftRow: true, depth, sectionDepth };
-  } else if (state.draft) {
-    const current = out.findIndex((e) => e.n?.id === state.selectedId);
-    out.splice(current >= 0 ? current + 1 : 0, 0, {
-      draftRow: true,
-      depth: current >= 0 ? out[current].depth + 1 : 0,
-      sectionDepth: current >= 0 ? out[current].sectionDepth : 0,
-    });
+  for (const draft of newAgentDrafts()) {
+    const created = draft.creator?.convId;
+    const listed = created ? out.findIndex((e) => e.n?.id === created) : -1;
+    if (listed >= 0) {
+      const { depth, sectionDepth } = out[listed];
+      out[listed] = { draftRow: draft, depth, sectionDepth };
+    } else out.unshift({ draftRow: draft, depth: 0 });
   }
   return out;
 }
@@ -355,12 +358,12 @@ function announce(text: string): void {
   treeAnnouncer.textContent = text;
 }
 
-// Agent ids key real rows; one fixed sentinel keys the draft row.
+// Each retained draft has its own stable row identity.
 const rowKey = (e: TreeEntry): string =>
   e.header
     ? `section:${sectionKey(e.header)}`
     : e.draftRow
-      ? "__draft__"
+      ? e.draftRow.uiStateId
       : e.n!.id;
 
 // One row: the not-yet-created draft placeholder, or a real agent node.
@@ -379,28 +382,18 @@ function rowT(
       : {},
   );
   if (e.draftRow) {
-    return html`<div
-      class="agent cursor draft-row"
-      data-theme="sidebar-row"
-      style=${pad}
-      role="treeitem"
-      aria-label="New agent draft"
-      @click=${() => {
-        syncHistoryToSelection();
-        inputEl.focus();
-      }}
-    >
-      <div class="row1">
-        <span
-          class="agent-state draft"
-          role="img"
-          aria-label="Draft agent"
-          title="Draft agent"
-          ><span class="state-mark" aria-hidden="true"></span
-        ></span>
-        <span class="title">New agent</span>
-      </div>
-    </div>`;
+    const draft = e.draftRow;
+    return draftRow(draft, {
+      selected: state.draft === draft,
+      style: pad,
+      level: e.depth + 1,
+      parentTitle: draft.parent ? state.nodes[draft.parent]?.title : undefined,
+      open: () => openDraft(draft),
+      discard: () => {
+        discardDraft(draft, selectAgent);
+        renderSidebar();
+      },
+    });
   }
   const n = e.n!;
   const takenOver = isTakenOver(n);
@@ -564,7 +557,7 @@ export function renderSidebar(): void {
         const sectionRows = repeat(
           entries.filter((e) =>
             e.draftRow
-              ? (state.draft?.backendLabel ?? "") === label
+              ? (e.draftRow.backendLabel ?? "") === label
               : e.header
                 ? e.header.backend === label
                 : parseConversationId(e.n!.id).label === label,
@@ -631,6 +624,30 @@ window.addEventListener("recurse:stop-pending", () => renderSidebar());
 window.addEventListener(SIDEBAR_CHANGE, () => renderSidebar());
 setInterval(() => renderSidebar(), 60_000);
 
+export function openDraft(draft: Draft): void {
+  if (pendingSavedRecovery) {
+    alert("Wait for your recovered message to load before opening a draft.");
+    return;
+  }
+  if (!guardLeaveComments()) return;
+  snapshotComposerOwner(currentUiOwnerId());
+  releaseEmptyDraft(draft);
+  if (!retainDraft(draft)) return;
+  window.dispatchEvent(new Event("recurse:selection-change"));
+  state.draft = draft;
+  state.selectedId = DRAFT;
+  state.cursorId = DRAFT;
+  state.openConvHash = "";
+  abandonBackgroundWarming();
+  switchComposerOwner(draft.uiStateId);
+  preloadSkills();
+  renderDraft();
+  renderSidebar();
+  syncHistoryToSelection();
+  refreshUpBtn();
+  inputEl.focus();
+}
+
 export function selectAgent(
   id: string,
   refetch = true,
@@ -647,16 +664,17 @@ export function selectAgent(
   // before any selectedId/draft mutation so even a cold async navigation cannot
   // retarget it.
   if (!skipComposerSnapshot) snapshotComposerOwner(outgoingUiOwner);
-  // Invariant: Staged files switch through the same owner lifecycle as text.
-  // Saved owners stay cached; an unreachable draft is disposed by dropPrevious
-  // below, while draft promotion transfers both views to the newly created
-  // conversation.
+  const promoteDraft =
+    preserveAttachments &&
+    !skipComposerSnapshot &&
+    state.draft?.creator?.convId === id;
+  releaseEmptyDraft();
   state.draft = null;
   noteSelection(id);
   state.selectedId = id;
   state.cursorId = id;
-  if (outgoing === DRAFT && preserveAttachments) promoteComposerOwner(id);
-  else switchComposerOwner(id, outgoing === DRAFT);
+  if (promoteDraft) promoteComposerOwner(id);
+  else switchComposerOwner(id);
   if (state.nodes[id]) announceNode(state.nodes[id], "Opened conversation");
   selectedRowReveal = requestSelectedRowReveal(id);
   state.openConvHash = "";
@@ -686,11 +704,12 @@ export function selectAgent(
   // Invariant: Warm cached threads stay interactive while reconciling. Cold
   // switches stand down old chrome; owner-preserving draft promotion is already
   // this conversation and must never dim or become inert.
-  if (id !== DRAFT) showSelectedConversation(id, preserveAttachments);
+  if (!id) renderEmptyAgentList();
+  else if (id !== DRAFT) showSelectedConversation(id, preserveAttachments);
   preloadSkills();
   // Dispatch the focused read before mounting saved panes. Its hold keeps
   // closed-pane probes from taking a connection ahead of the focused read.
-  if (refetch) refreshConv();
+  if (refetch && id) refreshConv();
   syncPanes();
   renderSidebar();
   if (treeFocused) focusAgentTree();
@@ -724,7 +743,7 @@ function currentHistoryView(): HistoryView {
   return { agent: state.selectedId, draft: false };
 }
 
-export function syncHistoryToSelection(): void {
+function syncHistoryToSelection(): void {
   const correction = correctingHistory;
   if (!deferImageVisitSelectionHistory(() => writeSelectionHistory(correction)))
     writeSelectionHistory(correction);

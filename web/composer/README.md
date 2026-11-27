@@ -7,6 +7,11 @@ restoring refused text, and selecting the temporary draft during login
 recovery. It keeps the phone caret on composer control taps.
 [`view-state.ts`](view-state.ts) keeps selection and draft text.
 Sending and the rest of recovery stay in [`../composer.ts`](../composer.ts).
+[New-agent drafts](../new-agent-drafts/README.md) retain separate owners while
+navigating, with resumable rows and confirmed discard. They remain in this tab's
+memory, not across reloads. The draft limit refuses new drafts rather than
+evicting unsent work. Successful creation transfers the same owner payload to
+the saved agent, including when another conversation is open.
 
 [`action.ts`](action.ts) owns the Send/Stop button. The conversation's
 [Stop view](../conversation/stop-view.ts) supplies its availability and target;

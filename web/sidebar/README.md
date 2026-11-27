@@ -132,7 +132,12 @@ retain normal tree navigation.
 
 ## Starting agents
 
-New agent opens its draft immediately. Export `export const newAgent = { ask: "tag" };`
+New agent opens a separate draft immediately. Draft rows stay outside scripted
+sections so navigation and collapsed sections cannot hide unsent work. Each row
+reopens its own composer owner; discard requires confirmation. These drafts
+live only in the current tab until sent or discarded.
+
+Export `export const newAgent = { ask: "tag" };`
 to show an optional tag control below its model picker, including on phones and
 connected backends. The control opens the same tag box; No tag clears the choice.
 Without this export, the draft has no tag control.

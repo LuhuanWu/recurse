@@ -89,14 +89,46 @@ export class ComposerViewStateController {
 
   promoteTo(ownerId: string): ComposerViewState {
     if (ownerId === this.ownerId) return this.store.composer(ownerId);
-    const previous = this.ownerId;
-    this.snapshot(previous);
-    const volatile = this.volatile.get(previous);
-    this.store.transfer(previous, ownerId);
-    this.volatile.delete(previous);
-    if (volatile) this.volatile.set(ownerId, volatile);
+    this.snapshot(this.ownerId);
+    this.transfer(this.ownerId, ownerId);
     this.ownerId = ownerId;
     return this.restore(ownerId);
+  }
+
+  transfer(from: string, to: string, preserveTarget = false): void {
+    if (from === to) return;
+    if (preserveTarget && to === this.ownerId) this.snapshot(to);
+    const source = this.volatile.get(from) || this.store.composer(from);
+    const target = preserveTarget
+      ? this.volatile.get(to) || this.store.composer(to)
+      : null;
+    this.store.transfer(from, to, preserveTarget);
+    this.volatile.delete(from);
+    const prefix =
+      target?.text && target.text !== source.text && source.text
+        ? `${source.text}\n`
+        : "";
+    this.put(
+      to,
+      target?.text
+        ? {
+            text: prefix + target.text,
+            selectionStart: prefix.length + target.selectionStart,
+            selectionEnd: prefix.length + target.selectionEnd,
+          }
+        : source,
+    );
+  }
+
+  discard(ownerId: string): void {
+    this.volatile.delete(ownerId);
+    this.store.remove(ownerId);
+    // Do not snapshot the discarded owner again during the following switch.
+    if (this.ownerId === ownerId) {
+      this.ownerId = "";
+      this.field.value = "";
+      this.field.setSelectionRange(0, 0);
+    }
   }
 
   clear(ownerId: string): boolean {

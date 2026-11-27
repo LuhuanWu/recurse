@@ -64,8 +64,7 @@ export function visibleAgent(id: string): boolean {
   return Object.prototype.hasOwnProperty.call(state.nodes, id);
 }
 
-// A saved conversation's immutable id owns its browser UI state. The one live,
-// not-yet-created draft gets a separate random namespace until promotion.
+// Saved conversations and each not-yet-created draft own separate UI namespaces.
 export function currentUiOwnerId(): string {
   return state.selectedId === DRAFT
     ? state.draft?.uiStateId || "draft:unowned"

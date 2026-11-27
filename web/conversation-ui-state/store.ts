@@ -1,6 +1,7 @@
 // Owns per-conversation view state across local and session retention tiers.
-// codec.ts interprets untrusted bytes; persistence.ts reserves, repairs and
-// commits slots over this store's state.
+// codec validates bytes; persistence reserves, repairs and commits state slots.
+// Bounded retained drafts pin memory-only owners against eviction and storage
+// invalidation until discard/promotion; ordinary ephemeral owners are evictable.
 import {
   FLUSH_DELAY_MS,
   LEGACY_PANE_PREFIX,
@@ -78,6 +79,7 @@ export class ConversationUiStateStore implements UiStateStoreState {
   trustedSessionIndex: string | null = null;
   flushTimer: ReturnType<typeof setTimeout> | null = null;
   private ownerResources = new Set<ManagedOwnerResource>();
+  private retainedDraftOwners = new Set<string>();
 
   constructor(
     public localStorage: StorageLike | null,
@@ -102,12 +104,20 @@ export class ConversationUiStateStore implements UiStateStoreState {
     this.sessionRecords.set(ownerId, value);
     for (const id of this.sessionRecords.keys()) {
       if (this.sessionRecords.size <= MAX_RETAINED_OWNERS) break;
-      if (id !== ownerId && !this.dirtySession.has(id)) {
+      if (
+        id !== ownerId &&
+        !this.retainedDraftOwners.has(id) &&
+        !this.dirtySession.has(id)
+      ) {
         this.sessionRecords.delete(id);
         this.sessionPaneFields.delete(id);
         this.releaseOwnerResources(id);
       }
     }
+  }
+
+  retainDraftOwner(ownerId: string): void {
+    if (ephemeralOwner(ownerId)) this.retainedDraftOwners.add(ownerId);
   }
 
   private retainOwner(ownerId: string): boolean {
@@ -124,6 +134,7 @@ export class ConversationUiStateStore implements UiStateStoreState {
     const resource = new OwnerResourceStoreImpl<T>(
       (ownerId) => this.retainOwner(ownerId),
       dispose,
+      (ownerId) => this.retainedDraftOwners.has(ownerId),
     );
     this.ownerResources.add(resource);
     return resource;
@@ -326,7 +337,11 @@ export class ConversationUiStateStore implements UiStateStoreState {
     return true;
   }
 
-  transfer(fromOwnerId: string, toOwnerId: string): void {
+  transfer(
+    fromOwnerId: string,
+    toOwnerId: string,
+    preserveTarget = false,
+  ): void {
     if (
       fromOwnerId === toOwnerId ||
       !validOwnerId(fromOwnerId) ||
@@ -335,15 +350,16 @@ export class ConversationUiStateStore implements UiStateStoreState {
       return;
     const local = this.loadLocal(fromOwnerId),
       session = this.loadSession(fromOwnerId);
+    const target = preserveTarget ? this.snapshot(toOwnerId) : null;
     for (const resource of this.ownerResources)
       resource.transfer(fromOwnerId, toOwnerId);
     this.cacheLocal(toOwnerId, {
-      pane: { ...local.pane },
-      panes: clonePaneStates(local.panes),
+      pane: { ...(target?.pane || local.pane) },
+      panes: { ...clonePaneStates(local.panes), ...target?.localPanes },
     });
     this.cacheSession(toOwnerId, {
       composer: { ...session.composer },
-      panes: clonePaneStates(session.panes),
+      panes: { ...clonePaneStates(session.panes), ...target?.sessionPanes },
     });
     this.remove(fromOwnerId);
     markDirtyFor(this, toOwnerId, "local", LOCAL_PANE_VISIBILITY);
@@ -357,6 +373,7 @@ export class ConversationUiStateStore implements UiStateStoreState {
   remove(ownerId: string): void {
     if (!validOwnerId(ownerId)) return;
     this.releaseOwnerResources(ownerId);
+    this.retainedDraftOwners.delete(ownerId);
     this.localRecords.delete(ownerId);
     this.sessionRecords.delete(ownerId);
     this.dirtyLocal.delete(ownerId);
@@ -419,7 +436,9 @@ export class ConversationUiStateStore implements UiStateStoreState {
       dirty: Set<string>,
       slots: Map<string, number>,
     ) => {
-      for (const id of records.keys()) if (!dirty.has(id)) records.delete(id);
+      for (const id of records.keys())
+        if (!dirty.has(id) && !this.retainedDraftOwners.has(id))
+          records.delete(id);
       slots.clear();
     };
     const localKey =
